@@ -4,11 +4,11 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKe
 from telegram.ext import (Application, CommandHandler, MessageHandler,
     CallbackQueryHandler, ContextTypes, filters, ConversationHandler)
 from telegram.error import BadRequest
-
+ 
 logging.basicConfig(level=logging.INFO)
 TOKEN = os.environ.get("BOT_TOKEN", "")
 DATA_FILE = "data.json"
-
+ 
 # ── States ────────────────────────────────────────────────────────
 (SETUP_GOAL, SETUP_NAME, SETUP_AGE, SETUP_HEIGHT, SETUP_SW,
  SETUP_TW, SETUP_DATE, SETUP_ACTIVITY, SETUP_SG) = range(9)
@@ -17,17 +17,17 @@ S_DATE, S_VAL       = range(30, 32)
 WO_DATE, WO_VAL     = range(40, 42)
 SL_DATE, SL_START, SL_END, SL_WAKES = range(50, 54)
 RT_DATE, RT_VAL     = range(60, 62)
-
+ 
 # ── Storage ───────────────────────────────────────────────────────
 def load():
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, "r", encoding="utf-8") as f: return json.load(f)
     return {}
-
+ 
 def save(data):
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
-
+ 
 def get_user(data, uid):
     uid = str(uid)
     if uid not in data:
@@ -35,23 +35,23 @@ def get_user(data, uid):
     if "checkins" in data[uid] and "days" not in data[uid]:
         data[uid]["days"] = data[uid].pop("checkins")
     return data[uid]
-
+ 
 def get_day(u, ds): 
     if ds not in u["days"]: u["days"][ds] = {}
     return u["days"][ds]
-
+ 
 def today_s(): return date.today().isoformat()
 def ds(d): return d.isoformat() if isinstance(d, date) else d
-
+ 
 # ── Delete helper ─────────────────────────────────────────────────
 async def safe_delete(bot, chat_id, msg_id):
     try: await bot.delete_message(chat_id, msg_id)
     except: pass
-
+ 
 async def delete_prev(ctx, chat_id):
     mid = ctx.user_data.get("last_bot_msg")
     if mid: await safe_delete(ctx.bot, chat_id, mid)
-
+ 
 async def send_and_track(update_or_query, ctx, text, keyboard=None, parse_mode="Markdown"):
     """Send message, delete previous bot message, track new one"""
     is_query = hasattr(update_or_query, 'message') and hasattr(update_or_query, 'answer')
@@ -68,12 +68,12 @@ async def send_and_track(update_or_query, ctx, text, keyboard=None, parse_mode="
         msg = await update_or_query.message.reply_text(**kwargs)
     ctx.user_data["last_bot_msg"] = msg.message_id
     return msg
-
+ 
 # ── Helpers ───────────────────────────────────────────────────────
 def pbar(val, mx, length=8):
     f = int((val/max(mx,1))*length)
     return "▓"*f + "░"*(length-f)
-
+ 
 def streak(days):
     d = date.today()
     if not days.get(ds(d),{}).get("weight"): d -= timedelta(1)
@@ -82,13 +82,13 @@ def streak(days):
         if days.get(ds(d),{}).get("weight"): n+=1; d-=timedelta(1)
         else: break
     return n
-
+ 
 def sleep_hrs(s, e):
     sh,sm=map(int,s.split(":")); eh,em=map(int,e.split(":"))
     s2=sh*60+sm; e2=eh*60+em
     if e2<=s2: e2+=1440
     return (e2-s2)/60
-
+ 
 def sleep_score(hrs, wakes):
     d=50 if 7<=hrs<=9 else 40 if hrs>=6.5 else 28 if hrs>=6 else 15 if hrs>=5 else 5
     w=[50,38,26,16,10,5,0][min(wakes,6)]
@@ -97,72 +97,69 @@ def sleep_score(hrs, wakes):
     if t>=70: return t,"😴 Хороший"
     if t>=50: return t,"😐 Средний"
     return t,"😮 Плохой"
-
+ 
 def get_level(xp):
     for mn,nm in reversed([(0,"⚡ Новичок"),(150,"🥊 Боец"),(350,"🏃 Атлет"),(700,"🏆 Чемпион"),(1500,"🤖 Машина")]):
         if xp>=mn: return mn,nm
     return 0,"⚡ Новичок"
-
+ 
 def dlabel(ds_str):
     d2 = datetime.strptime(ds_str,"%Y-%m-%d").date()
     if d2==date.today(): return "сегодня"
     if d2==date.today()-timedelta(1): return "вчера"
     return d2.strftime("%d.%m.%Y")
-
+ 
 def days_left(s):
     try:
         goal_d = datetime.strptime(s["goalDate"], "%Y-%m-%d").date()
         return max(0,(goal_d-date.today()).days)
     except: return 0
-
+ 
 def calc_nutrition(s):
-    """Calculate BMR, TDEE, calories and macros"""
-    age    = s.get("age", 25)
-    height = s.get("height", 175)
-    weight = s.get("currentWeight", s.get("startWeight", 75))
-    gender = s.get("gender", "male")
+    """
+    Mifflin-St Jeor BMR → TDEE → target calories.
+    Дефицит считается исходя из срока и кол-ва кг — реалистично.
+    """
+    age      = s.get("age", 25)
+    height   = s.get("height", 175)
+    weight   = s.get("currentWeight", s.get("startWeight", 75))
+    gender   = s.get("gender", "male")
     activity = s.get("activity", 1.55)
-    goal   = s.get("goal", "lose")  # lose / gain / maintain
-    diff_kg = abs(s.get("startWeight",75) - s.get("targetWeight",70))
-
-    # Mifflin-St Jeor
+    goal     = s.get("goal", "lose")
+    diff_kg  = abs(s.get("startWeight", 75) - s.get("targetWeight", 70))
+    dl       = days_left(s) if days_left(s) > 0 else 60
+ 
+    # Mifflin-St Jeor BMR
     if gender == "male":
         bmr = 10*weight + 6.25*height - 5*age + 5
     else:
         bmr = 10*weight + 6.25*height - 5*age - 161
-
+ 
     tdee = bmr * activity
-
+ 
     if goal == "lose":
-        # deficit based on how much to lose
-        deficit = 500 if diff_kg >= 5 else 300
-        kcal = max(1200, tdee - deficit)
-        protein = weight * 2.2   # high protein to preserve muscle
-        fat     = weight * 1.0
-        carbs   = (kcal - protein*4 - fat*9) / 4
+        # 1 кг жира = ~7700 ккал. Считаем нужный дефицит под срок.
+        needed_deficit_total = diff_kg * 7700
+        daily_deficit = needed_deficit_total / dl
+        # Ограничиваем: минимум 200, максимум 1000 ккал дефицита
+        daily_deficit = max(200, min(1000, daily_deficit))
+        kcal = max(1300 if gender=="female" else 1500, int(tdee - daily_deficit))
     elif goal == "gain":
-        surplus = 400 if diff_kg >= 5 else 250
-        kcal = tdee + surplus
-        protein = weight * 2.0
-        fat     = weight * 1.1
-        carbs   = (kcal - protein*4 - fat*9) / 4
-    else:  # maintain
-        kcal = tdee
-        protein = weight * 1.8
-        fat     = weight * 1.0
-        carbs   = (kcal - protein*4 - fat*9) / 4
-
-    return {
-        "bmr": int(bmr), "tdee": int(tdee), "kcal": int(kcal),
-        "protein": int(max(0,protein)), "fat": int(max(0,fat)), "carbs": int(max(0,carbs))
-    }
-
+        needed_surplus_total = diff_kg * 7700
+        daily_surplus = needed_surplus_total / dl
+        daily_surplus = max(150, min(600, daily_surplus))
+        kcal = int(tdee + daily_surplus)
+    else:
+        kcal = int(tdee)
+ 
+    return {"bmr": int(bmr), "tdee": int(tdee), "kcal": kcal}
+ 
 def goal_emoji(goal):
     return {"lose":"📉 Похудение","gain":"📈 Набор массы","maintain":"⚖️ Поддержание"}[goal]
-
+ 
 def activity_name(a):
     return {1.2:"🛋 Минимум",1.375:"🚶 Лёгкая",1.55:"🏃 Средняя",1.725:"💪 Высокая",1.9:"🏋️ Очень высокая"}[a]
-
+ 
 def main_kb():
     return ReplyKeyboardMarkup([
         ["🏠 Главная",    "📅 Календарь"],
@@ -172,7 +169,7 @@ def main_kb():
         ["📈 Аналитика",  "🎮 Игра"],
         ["⚙️ Настройки"],
     ], resize_keyboard=True)
-
+ 
 def day_kb(prefix, days=5):
     today_d = date.today()
     labels = ["Сегодня","Вчера","2 дня назад","3 дня назад","4 дня назад"]
@@ -180,7 +177,7 @@ def day_kb(prefix, days=5):
         f"{labels[i]} ({(today_d-timedelta(i)).strftime('%d.%m')})",
         callback_data=f"{prefix}_{ds(today_d-timedelta(i))}")] for i in range(days)]
     return InlineKeyboardMarkup(rows)
-
+ 
 # ── SETUP ────────────────────────────────────────────────────────
 async def cmd_start(update: Update, ctx):
     data=load(); u=get_user(data,update.effective_user.id); save(data)
@@ -198,7 +195,7 @@ async def cmd_start(update: Update, ctx):
         parse_mode="Markdown", reply_markup=kb)
     ctx.user_data["last_bot_msg"] = msg.message_id
     return SETUP_GOAL
-
+ 
 async def setup_goal(update: Update, ctx):
     q=update.callback_query; await q.answer()
     goal = q.data.replace("goal_","")
@@ -207,7 +204,7 @@ async def setup_goal(update: Update, ctx):
         f"Отлично! *{goal_emoji(goal)}*\n\nКак тебя зовут?",
         parse_mode="Markdown")
     return SETUP_NAME
-
+ 
 async def setup_name(update: Update, ctx):
     name = update.message.text.strip()[:20]
     ctx.user_data["name"] = name
@@ -216,7 +213,7 @@ async def setup_name(update: Update, ctx):
     msg = await update.message.reply_text(f"Привет, *{name}*! 👋\n\nСколько тебе лет?", parse_mode="Markdown")
     ctx.user_data["last_bot_msg"] = msg.message_id
     return SETUP_AGE
-
+ 
 async def setup_age(update: Update, ctx):
     try:
         age = int(update.message.text.strip()); assert 10<=age<=100
@@ -234,14 +231,14 @@ async def setup_age(update: Update, ctx):
         msg = await update.message.reply_text("❌ Введи число от 10 до 100")
         ctx.user_data["last_bot_msg"] = msg.message_id
         return SETUP_AGE
-
+ 
 async def setup_gender(update: Update, ctx):
     q=update.callback_query; await q.answer()
     ctx.user_data["gender"] = q.data.replace("gen_","")
     gen_txt = "👨 Мужской" if ctx.user_data["gender"]=="male" else "👩 Женский"
     await q.edit_message_text(f"*{gen_txt}* ✓\n\nВведи свой рост (см), например: `178`", parse_mode="Markdown")
     return SETUP_HEIGHT
-
+ 
 async def setup_height(update: Update, ctx):
     try:
         h = int(update.message.text.strip()); assert 100<=h<=250
@@ -255,7 +252,7 @@ async def setup_height(update: Update, ctx):
         msg = await update.message.reply_text("❌ Введи рост от 100 до 250")
         ctx.user_data["last_bot_msg"] = msg.message_id
         return SETUP_HEIGHT
-
+ 
 async def setup_sw(update: Update, ctx):
     try:
         w=float(update.message.text.replace(",",".")); assert 30<w<300
@@ -275,7 +272,7 @@ async def setup_sw(update: Update, ctx):
         msg = await update.message.reply_text("❌ Введи число, например: 82.5")
         ctx.user_data["last_bot_msg"] = msg.message_id
         return SETUP_SW
-
+ 
 async def setup_tw(update: Update, ctx):
     try:
         w=float(update.message.text.replace(",",".")); assert 30<w<300
@@ -290,7 +287,7 @@ async def setup_tw(update: Update, ctx):
         msg = await update.message.reply_text("❌ Для похудения: цель < текущего. Для набора: цель > текущего.")
         ctx.user_data["last_bot_msg"] = msg.message_id
         return SETUP_TW
-
+ 
 async def _ask_date(update, ctx):
     today_d = date.today()
     presets = [
@@ -309,7 +306,7 @@ async def _ask_date(update, ctx):
         reply_markup=InlineKeyboardMarkup(rows))
     ctx.user_data["last_bot_msg"] = msg.message_id
     return SETUP_DATE
-
+ 
 async def setup_date(update: Update, ctx):
     q=update.callback_query; await q.answer()
     if q.data=="gdate_manual":
@@ -325,7 +322,7 @@ async def setup_date(update: Update, ctx):
             [InlineKeyboardButton("🏋️ Очень высокая (2×день)", callback_data="act_1.9")],
         ]))
     return SETUP_ACTIVITY
-
+ 
 async def setup_date_text(update: Update, ctx):
     try:
         d2 = datetime.strptime(update.message.text.strip(), "%d.%m.%Y").date()
@@ -347,20 +344,20 @@ async def setup_date_text(update: Update, ctx):
         msg = await update.message.reply_text("❌ Формат: ДД.ММ.ГГГГ, например: 31.12.2026")
         ctx.user_data["last_bot_msg"] = msg.message_id
         return SETUP_DATE
-
+ 
 async def setup_activity(update: Update, ctx):
     q=update.callback_query; await q.answer()
     activity = float(q.data.replace("act_",""))
     ctx.user_data["activity"] = activity
     await q.edit_message_text(f"*{activity_name(activity)}* ✓\n\nНорма шагов в день (например: `10000`):", parse_mode="Markdown")
     return SETUP_SG
-
+ 
 async def setup_sg(update: Update, ctx):
     try:
         steps=int(update.message.text.replace(" ","")); assert 500<=steps<=50000
         await safe_delete(ctx.bot, update.effective_chat.id, update.message.message_id)
         await delete_prev(ctx, update.effective_chat.id)
-
+ 
         data=load(); u=get_user(data,update.effective_user.id)
         s = {
             "name":       ctx.user_data.get("name",""),
@@ -379,22 +376,20 @@ async def setup_sg(update: Update, ctx):
         u["settings"] = s
         nut = calc_nutrition(s)
         save(data)
-
+ 
         goal_d = datetime.strptime(s["goalDate"],"%Y-%m-%d").date()
         dl = (goal_d - date.today()).days
         diff = abs(s["startWeight"]-s["targetWeight"])
         goal_txt = goal_emoji(s["goal"])
-
+ 
         msg = await update.message.reply_text(
             f"🎯 *Всё настроено, {s['name']}!*\n\n"
             f"*Цель:* {goal_txt}\n"
             f"⚖️ {s['startWeight']} → {s['targetWeight']} кг ({'+' if s['goal']=='gain' else '-'}{diff:.1f} кг)\n"
             f"📅 Дедлайн: *{goal_d.strftime('%d.%m.%Y')}* ({dl} дней)\n\n"
-            f"*🍎 Твои нормы:*\n"
-            f"🔥 Калории: *{nut['kcal']} ккал/день*\n"
-            f"🥩 Белки: *{nut['protein']} г*\n"
-            f"🥑 Жиры: *{nut['fat']} г*\n"
-            f"🍞 Углеводы: *{nut['carbs']} г*\n"
+            f"*🍎 Норма калорий:*\n"
+            f"🔥 *{nut['kcal']} ккал/день*\n"
+            f"(базовый обмен {nut['bmr']} + активность = {nut['tdee']}, цель = {nut['kcal']})\n"
             f"👟 Шаги: *{steps:,}/день*\n\n"
             f"Используй кнопки ниже 👇",
             parse_mode="Markdown", reply_markup=main_kb())
@@ -404,21 +399,21 @@ async def setup_sg(update: Update, ctx):
         msg = await update.message.reply_text("❌ Например: 10000")
         ctx.user_data["last_bot_msg"] = msg.message_id
         return SETUP_SG
-
+ 
 # ── HOME ──────────────────────────────────────────────────────────
 async def show_home(update: Update, ctx):
     data=load(); u=get_user(data,update.effective_user.id)
     s=u["settings"]
     if not s.get("startWeight"):
         await update.message.reply_text("Сначала /start"); return
-
+ 
     await delete_prev(ctx, update.effective_chat.id)
-
+ 
     days_d=u["days"]; td=today_s(); td_day=days_d.get(td,{})
     ws=sorted([(k,v["weight"]) for k,v in days_d.items() if v.get("weight")],reverse=True)
     cur_w=ws[0][1] if ws else s["startWeight"]
     s["currentWeight"]=cur_w
-
+ 
     diff = cur_w - s["targetWeight"]
     diff_abs = abs(diff)
     if s.get("goal")=="gain":
@@ -426,7 +421,7 @@ async def show_home(update: Update, ctx):
     else:
         lost=max(0,s["startWeight"]-cur_w)
         progress_txt = f"📉 Сброшено: *{lost:.1f} кг* · осталось: *{diff_abs:.1f} кг*"
-
+ 
     dl = days_left(s)
     try:
         goal_d=datetime.strptime(s["goalDate"],"%Y-%m-%d").date()
@@ -435,10 +430,10 @@ async def show_home(update: Update, ctx):
         pct=min(100,max(0,int(elapsed/max(total,1)*100)))
         pb=pbar(elapsed,total,12)
     except: pct=0; pb="░"*12
-
+ 
     nut=calc_nutrition(s)
     strk=streak(days_d); xp=u.get("xp",0); _,lvl=get_level(xp)
-
+ 
     w_today  = f"⚖️ {td_day['weight']} кг" if td_day.get("weight") else "⚖️ вес не введён"
     s_today  = f"👟 {td_day['steps']:,}" if td_day.get("steps") is not None else "👟 шаги не введены"
     wo_today = "💪 тренировка: " + ("да ✅" if td_day.get("workout") else "нет") if "workout" in td_day else "💪 не отмечена"
@@ -448,9 +443,9 @@ async def show_home(update: Update, ctx):
         hrs=sleep_hrs(sl_today["start"],sl_today["end"])
         sc,lbl=sleep_score(hrs,sl_today.get("wakeups",0))
         sl_txt=f"\n🌙 Сон: {int(hrs)}ч {int((hrs%1)*60)}мин — {lbl}"
-
+ 
     goal_d_fmt = datetime.strptime(s["goalDate"],"%Y-%m-%d").strftime("%d.%m.%Y")
-
+ 
     msg = await update.message.reply_text(
         f"🏠 *{s.get('name','')} · {date.today().strftime('%d.%m.%Y')}*\n\n"
         f"{goal_emoji(s.get('goal','lose'))} · до {goal_d_fmt}: *{dl} дн.*\n"
@@ -459,50 +454,115 @@ async def show_home(update: Update, ctx):
         f"{progress_txt}\n\n"
         f"🔥 Стрик: *{strk} дней* · {lvl} · {xp} XP\n\n"
         f"*Сегодня:*\n{w_today}\n{s_today}\n{wo_today}{sl_txt}\n\n"
-        f"🍎 Норма: *{nut['kcal']} ккал* | Б:{nut['protein']}г Ж:{nut['fat']}г У:{nut['carbs']}г",
+        f"🍎 Норма: *{nut['kcal']} ккал/день*",
         parse_mode="Markdown", reply_markup=main_kb())
     ctx.user_data["last_bot_msg"] = msg.message_id
-
+ 
 # ── CALORIES ─────────────────────────────────────────────────────
+FOOD_DATE, FOOD_VAL = range(70, 72)
+ 
 async def show_calories(update: Update, ctx):
     data=load(); u=get_user(data,update.effective_user.id)
     s=u["settings"]
     if not s.get("startWeight"):
         await update.message.reply_text("Сначала /start"); return
     await delete_prev(ctx, update.effective_chat.id)
-
+ 
     ws=sorted([(k,v["weight"]) for k,v in u["days"].items() if v.get("weight")],reverse=True)
     if ws: s["currentWeight"]=ws[0][1]
     nut=calc_nutrition(s)
-
+    gender_txt="👨 Мужчина" if s.get("gender")=="male" else "👩 Женщина"
     goal_txt=goal_emoji(s.get("goal","lose"))
-    diff=abs(s.get("startWeight",75)-s.get("targetWeight",70))
-    gender_txt="👨 Мужской" if s.get("gender")=="male" else "👩 Женский"
-
-    # Rate of progress
-    goal=s.get("goal","lose")
-    weekly = diff / max(days_left(s)/7, 1)
-    rate_txt = f"{'📉' if goal=='lose' else '📈'} Темп: ~{weekly:.2f} кг/нед"
-
-    msg = await update.message.reply_text(
-        f"🍎 *Питание и калораж*\n\n"
-        f"*Твои данные:*\n"
-        f"{gender_txt} · {s.get('age')} лет · 📏{s.get('height')} см · ⚖️{s.get('currentWeight',s.get('startWeight'))} кг\n"
-        f"Активность: {activity_name(s.get('activity',1.55))}\n\n"
-        f"*Расчёт:*\n"
-        f"🧬 BMR (основной обмен): *{nut['bmr']} ккал*\n"
-        f"⚡ TDEE (с учётом активности): *{nut['tdee']} ккал*\n\n"
-        f"*Цель: {goal_txt}*\n"
-        f"🔥 Калории/день: *{nut['kcal']} ккал*\n\n"
-        f"*БЖУ:*\n"
-        f"🥩 Белки: *{nut['protein']} г* ({nut['protein']*4} ккал)\n"
-        f"🥑 Жиры: *{nut['fat']} г* ({nut['fat']*9} ккал)\n"
-        f"🍞 Углеводы: *{nut['carbs']} г* ({nut['carbs']*4} ккал)\n\n"
-        f"{rate_txt}\n"
-        f"📅 До цели: *{days_left(s)} дней*",
-        parse_mode="Markdown", reply_markup=main_kb())
+ 
+    # Today's eaten calories
+    td=today_s(); today_kcal=u["days"].get(td,{}).get("kcal_eaten",0)
+    remaining=nut["kcal"]-today_kcal
+    remain_txt=f"✅ В норме! Осталось: *{remaining} ккал*" if remaining>=0 else f"⚠️ Превышение на *{abs(remaining)} ккал*"
+ 
+    # Last 7 days log
+    today_d = date.today()
+    history = ""
+    for i in range(6, -1, -1):
+        d2 = (today_d - timedelta(i)).isoformat()
+        eaten = u["days"].get(d2, {}).get("kcal_eaten")
+        if eaten is not None:
+            diff = eaten - nut["kcal"]
+            mark = "✅" if diff <= 0 else "⚠️"
+            history += f"\n  {mark} {dlabel(d2)}: *{eaten}* ккал ({diff:+d})"
+ 
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("➕ Внести калории за сегодня", callback_data="food_today")],
+        [InlineKeyboardButton("📅 За другой день", callback_data="food_other")]
+    ])
+ 
+    text = (
+        f"🍎 *Калории*\n\n"
+        f"{gender_txt} · {s.get('age')} лет · {s.get('height')} см · {s.get('currentWeight', s.get('startWeight'))} кг\n"
+        f"Активность: {activity_name(s.get('activity', 1.55))}\n\n"
+        f"🧬 Базовый обмен (BMR): *{nut['bmr']} ккал*\n"
+        f"⚡ С учётом активности (TDEE): *{nut['tdee']} ккал*\n\n"
+        f"🎯 {goal_txt}\n"
+        f"🔥 *Твоя норма: {nut['kcal']} ккал/день*\n\n"
+        f"*Сегодня съедено:* {today_kcal if today_kcal else '—'} ккал\n"
+        + (f"{remain_txt}\n" if today_kcal else "")
+        + (f"\n*История:*{history}" if history else "")
+    )
+ 
+    msg = await update.message.reply_text(text, parse_mode="Markdown", reply_markup=kb)
     ctx.user_data["last_bot_msg"] = msg.message_id
-
+ 
+async def food_log_start(update: Update, ctx):
+    q=update.callback_query; await q.answer()
+    if q.data=="food_today":
+        ctx.user_data["food_date"]=today_s()
+        await q.edit_message_text(
+            "🍎 Сколько калорий съел сегодня?\n\nВведи число (например: `1850`):",
+            parse_mode="Markdown")
+    else:
+        await q.edit_message_text("📅 За какой день?", reply_markup=day_kb("food"))
+    return FOOD_DATE
+ 
+async def food_date_select(update: Update, ctx):
+    q=update.callback_query; await q.answer()
+    ds_val=q.data.replace("food_",""); ctx.user_data["food_date"]=ds_val
+    data=load(); u=get_user(data,q.from_user.id)
+    existing=u["days"].get(ds_val,{}).get("kcal_eaten")
+    hint=f"\nТекущее: *{existing} ккал*" if existing else ""
+    await q.edit_message_text(
+        f"🍎 Калории за *{dlabel(ds_val)}*{hint}\n\nВведи сколько съел (ккал):",
+        parse_mode="Markdown")
+    return FOOD_VAL
+ 
+async def food_val(update: Update, ctx):
+    try:
+        kcal=int(update.message.text.replace(" ","").replace(",","")); assert 0<=kcal<=10000
+        await safe_delete(ctx.bot, update.effective_chat.id, update.message.message_id)
+        ds_val=ctx.user_data.get("food_date", today_s())
+        data=load(); u=get_user(data,update.effective_user.id)
+        s=u["settings"]
+        ws=sorted([(k,v["weight"]) for k,v in u["days"].items() if v.get("weight")],reverse=True)
+        if ws: s["currentWeight"]=ws[0][1]
+        nut=calc_nutrition(s)
+        get_day(u,ds_val)["kcal_eaten"]=kcal
+        save(data)
+        diff=kcal-nut["kcal"]
+        if diff<=0:
+            verdict=f"✅ В норме! (норма {nut['kcal']} ккал, ты в дефиците {abs(diff)} ккал)"
+        elif diff<=200:
+            verdict=f"⚠️ Чуть больше нормы (+{diff} ккал)"
+        else:
+            verdict=f"❌ Превышение нормы на {diff} ккал"
+        await delete_prev(ctx, update.effective_chat.id)
+        msg=await update.message.reply_text(
+            f"✅ *{kcal} ккал* за *{dlabel(ds_val)}* сохранено!\n\n{verdict}",
+            parse_mode="Markdown", reply_markup=main_kb())
+        ctx.user_data["last_bot_msg"]=msg.message_id
+        return ConversationHandler.END
+    except:
+        msg=await update.message.reply_text("❌ Введи число калорий, например: 1850")
+        ctx.user_data["last_bot_msg"]=msg.message_id
+        return FOOD_VAL
+ 
 # ── WEIGHT ────────────────────────────────────────────────────────
 async def start_weight(update: Update, ctx):
     await delete_prev(ctx, update.effective_chat.id)
@@ -510,7 +570,7 @@ async def start_weight(update: Update, ctx):
         parse_mode="Markdown", reply_markup=day_kb("wd"))
     ctx.user_data["last_bot_msg"] = msg.message_id
     return W_DATE
-
+ 
 async def weight_date(update: Update, ctx):
     q=update.callback_query; await q.answer()
     ds_val=q.data.replace("wd_",""); ctx.user_data["w_date"]=ds_val
@@ -529,7 +589,7 @@ async def weight_date(update: Update, ctx):
     await q.edit_message_text(f"⚖️ Вес за *{dlabel(ds_val)}*{hint}\n\nВыбери:",
         parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(rows))
     return W_VAL
-
+ 
 async def weight_val_btn(update: Update, ctx):
     q=update.callback_query; await q.answer()
     if q.data=="wv_manual":
@@ -537,7 +597,7 @@ async def weight_val_btn(update: Update, ctx):
         return W_VAL
     w=float(q.data.replace("wv_",""))
     return await _save_weight(q, ctx, w, True)
-
+ 
 async def weight_val_text(update: Update, ctx):
     try:
         w=float(update.message.text.replace(",",".")); assert 30<w<300
@@ -548,7 +608,7 @@ async def weight_val_text(update: Update, ctx):
         msg = await update.message.reply_text("❌ Введи число, например: 76.3")
         ctx.user_data["last_bot_msg"] = msg.message_id
         return W_VAL
-
+ 
 async def _save_weight(obj, ctx, w, is_query):
     ds_val=ctx.user_data["w_date"]
     uid=obj.from_user.id
@@ -560,22 +620,20 @@ async def _save_weight(obj, ctx, w, is_query):
     check_achievements(u); save(data)
     diff_txt=""
     if prev: d2=w-prev; diff_txt=f" ({d2:+.1f} кг {'📉' if d2<0 else '📈'})"
-
-    # Show progress to goal
+ 
     s=u["settings"]
     target=s.get("targetWeight",w)
     to_go=abs(w-target)
     nut=calc_nutrition(s)
-
-    text=(f"✅ *Вес {w} кг* за *{dlabel(ds_val)}* сохранён{diff_txt}\n\n"
-          f"До цели: *{to_go:.1f} кг*\n"
-          f"🍎 Сегодня: *{nut['kcal']} ккал* | Б{nut['protein']} Ж{nut['fat']} У{nut['carbs']}")
+ 
+    text=(f"✅ *Вес {w} кг* за *{dlabel(ds_val)}* сохранён{diff_txt}\n"
+          f"До цели: *{to_go:.1f} кг* · Норма: *{nut['kcal']} ккал/день*")
     if is_query: await obj.edit_message_text(text, parse_mode="Markdown")
     else:
         msg = await obj.message.reply_text(text, parse_mode="Markdown", reply_markup=main_kb())
         ctx.user_data["last_bot_msg"] = msg.message_id
     return ConversationHandler.END
-
+ 
 # ── STEPS ────────────────────────────────────────────────────────
 async def start_steps(update: Update, ctx):
     await delete_prev(ctx, update.effective_chat.id)
@@ -583,7 +641,7 @@ async def start_steps(update: Update, ctx):
         parse_mode="Markdown", reply_markup=day_kb("sd"))
     ctx.user_data["last_bot_msg"] = msg.message_id
     return S_DATE
-
+ 
 async def steps_date(update: Update, ctx):
     q=update.callback_query; await q.answer()
     ds_val=q.data.replace("sd_",""); ctx.user_data["s_date"]=ds_val
@@ -597,14 +655,14 @@ async def steps_date(update: Update, ctx):
     await q.edit_message_text(f"👟 Шаги за *{dlabel(ds_val)}*\n\nВыбери:",
         parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(rows))
     return S_VAL
-
+ 
 async def steps_val_btn(update: Update, ctx):
     q=update.callback_query; await q.answer()
     if q.data=="sv_manual":
         await q.edit_message_text("👟 Введи количество шагов:", parse_mode="Markdown")
         return S_VAL
     return await _save_steps(q, ctx, int(q.data.replace("sv_","")), True)
-
+ 
 async def steps_val_text(update: Update, ctx):
     try:
         s=int(update.message.text.replace(" ","").replace(",","")); assert 0<=s<=100000
@@ -615,7 +673,7 @@ async def steps_val_text(update: Update, ctx):
         msg = await update.message.reply_text("❌ Введи число шагов")
         ctx.user_data["last_bot_msg"] = msg.message_id
         return S_VAL
-
+ 
 async def _save_steps(obj, ctx, s, is_query):
     ds_val=ctx.user_data["s_date"]; uid=obj.from_user.id
     data=load(); u=get_user(data,uid)
@@ -633,7 +691,7 @@ async def _save_steps(obj, ctx, s, is_query):
         msg = await obj.message.reply_text(text, parse_mode="Markdown", reply_markup=main_kb())
         ctx.user_data["last_bot_msg"] = msg.message_id
     return ConversationHandler.END
-
+ 
 # ── WORKOUT ──────────────────────────────────────────────────────
 async def start_workout(update: Update, ctx):
     await delete_prev(ctx, update.effective_chat.id)
@@ -641,7 +699,7 @@ async def start_workout(update: Update, ctx):
         parse_mode="Markdown", reply_markup=day_kb("wod"))
     ctx.user_data["last_bot_msg"] = msg.message_id
     return WO_DATE
-
+ 
 async def workout_date(update: Update, ctx):
     q=update.callback_query; await q.answer()
     ds_val=q.data.replace("wod_",""); ctx.user_data["wo_date"]=ds_val
@@ -650,7 +708,7 @@ async def workout_date(update: Update, ctx):
             InlineKeyboardButton("💪 Да, была!", callback_data="wov_yes"),
             InlineKeyboardButton("😴 Нет", callback_data="wov_no")]]))
     return WO_VAL
-
+ 
 async def workout_val(update: Update, ctx):
     q=update.callback_query; await q.answer()
     wo=q.data=="wov_yes"; ds_val=ctx.user_data["wo_date"]
@@ -663,7 +721,7 @@ async def workout_val(update: Update, ctx):
     xp_txt=f" +{xp_earn} XP" if xp_earn else ""
     await q.edit_message_text(f"✅ *{txt}* за *{dlabel(ds_val)}*{xp_txt}", parse_mode="Markdown")
     return ConversationHandler.END
-
+ 
 # ── RATING ───────────────────────────────────────────────────────
 async def start_rating(update: Update, ctx):
     await delete_prev(ctx, update.effective_chat.id)
@@ -671,7 +729,7 @@ async def start_rating(update: Update, ctx):
         parse_mode="Markdown", reply_markup=day_kb("rtd"))
     ctx.user_data["last_bot_msg"] = msg.message_id
     return RT_DATE
-
+ 
 async def rating_date(update: Update, ctx):
     q=update.callback_query; await q.answer()
     ds_val=q.data.replace("rtd_",""); ctx.user_data["rt_date"]=ds_val
@@ -680,7 +738,7 @@ async def rating_date(update: Update, ctx):
     await q.edit_message_text(f"⭐ Оценка за *{dlabel(ds_val)}* (1–10):",
         parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(rows))
     return RT_VAL
-
+ 
 async def rating_val(update: Update, ctx):
     q=update.callback_query; await q.answer()
     r=int(q.data.replace("rtv_","")); ds_val=ctx.user_data["rt_date"]
@@ -693,7 +751,7 @@ async def rating_val(update: Update, ctx):
     await q.edit_message_text(f"✅ *{stars}* ({r}/10) за *{dlabel(ds_val)}*"+(f" +{xp_earn} XP" if xp_earn else ""),
         parse_mode="Markdown")
     return ConversationHandler.END
-
+ 
 # ── SLEEP ────────────────────────────────────────────────────────
 async def start_sleep(update: Update, ctx):
     await delete_prev(ctx, update.effective_chat.id)
@@ -701,7 +759,7 @@ async def start_sleep(update: Update, ctx):
         parse_mode="Markdown", reply_markup=day_kb("sld"))
     ctx.user_data["last_bot_msg"] = msg.message_id
     return SL_DATE
-
+ 
 async def sleep_date(update: Update, ctx):
     q=update.callback_query; await q.answer()
     ds_val=q.data.replace("sld_",""); ctx.user_data["sl_date"]=ds_val
@@ -715,7 +773,7 @@ async def sleep_date(update: Update, ctx):
     await q.edit_message_text(f"🌙 Сон за *{dlabel(ds_val)}*\n\n😴 Лёг в:", parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(rows))
     return SL_START
-
+ 
 async def sleep_start_btn(update: Update, ctx):
     q=update.callback_query; await q.answer()
     if q.data=="slst_manual":
@@ -723,7 +781,7 @@ async def sleep_start_btn(update: Update, ctx):
     t=q.data.replace("slst_",""); ctx.user_data["sl_start"]=t
     await q.edit_message_text(f"😴 Лёг в *{t}*\n\n⏰ Проснулся в:", parse_mode="Markdown", reply_markup=_wake_kb())
     return SL_END
-
+ 
 async def sleep_start_text(update: Update, ctx):
     try:
         t=update.message.text.strip(); datetime.strptime(t,"%H:%M")
@@ -737,7 +795,7 @@ async def sleep_start_text(update: Update, ctx):
         msg = await update.message.reply_text("❌ Формат ЧЧ:ММ")
         ctx.user_data["last_bot_msg"] = msg.message_id
         return SL_START
-
+ 
 def _wake_kb():
     presets=["05:00","05:30","06:00","06:30","07:00","07:30","08:00","08:30","09:00","10:00"]
     rows=[]; row=[]
@@ -747,13 +805,13 @@ def _wake_kb():
     if row: rows.append(row)
     rows.append([InlineKeyboardButton("✏️ Другое", callback_data="slet_manual")])
     return InlineKeyboardMarkup(rows)
-
+ 
 async def sleep_end_btn(update: Update, ctx):
     q=update.callback_query; await q.answer()
     if q.data=="slet_manual":
         await q.edit_message_text("⏰ Введи время пробуждения (ЧЧ:ММ):", parse_mode="Markdown"); return SL_END
     return await _proc_end(q, ctx, q.data.replace("slet_",""), True)
-
+ 
 async def sleep_end_text(update: Update, ctx):
     try:
         t=update.message.text.strip(); datetime.strptime(t,"%H:%M")
@@ -763,7 +821,7 @@ async def sleep_end_text(update: Update, ctx):
         msg = await update.message.reply_text("❌ Формат ЧЧ:ММ")
         ctx.user_data["last_bot_msg"] = msg.message_id
         return SL_END
-
+ 
 async def _proc_end(obj, ctx, t, is_query):
     start=ctx.user_data["sl_start"]; hrs=sleep_hrs(start,t)
     if hrs<1 or hrs>18:
@@ -785,7 +843,7 @@ async def _proc_end(obj, ctx, t, is_query):
         msg = await obj.message.reply_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(rows))
         ctx.user_data["last_bot_msg"] = msg.message_id
     return SL_WAKES
-
+ 
 async def sleep_wakes(update: Update, ctx):
     q=update.callback_query; await q.answer()
     w=int(q.data.replace("slw_","")); ds_val=ctx.user_data["sl_date"]
@@ -806,55 +864,162 @@ async def sleep_wakes(update: Update, ctx):
         f"🌃 {wt} · *{sc}/100 {lbl}*\n{advice}"+(f"\n+{xp_earn} XP" if xp_earn else ""),
         parse_mode="Markdown")
     return ConversationHandler.END
-
+ 
 # ── CALENDAR ─────────────────────────────────────────────────────
 async def show_calendar(update: Update, ctx):
     data=load(); u=get_user(data,update.effective_user.id)
-    days_d=u["days"]; sl=u["sleep"]; today_d=date.today()
+    days_d=u["days"]; sl=u["sleep"]; s=u["settings"]
+    today_d=date.today()
     await delete_prev(ctx, update.effective_chat.id)
-
-    lines=["📅 *Дневник — последние 14 дней*\n━━━━━━━━━━━━━━━━━━━"]
+ 
+    # ── Часть 1: последние 7 дней подробно ──
+    lines=["📅 *Последние 7 дней*\n━━━━━━━━━━━━━━━"]
     weekdays=["Пн","Вт","Ср","Чт","Пт","Сб","Вс"]
-
-    for i in range(13,-1,-1):
-        d=today_d-timedelta(i); ds_val=ds(d)
-        day=days_d.get(ds_val,{}); sl_day=sl.get(ds_val,{})
-        dow=weekdays[d.weekday()]
-        is_today=d==today_d
-        prefix="📍 " if is_today else ""
-        today_mark=" ◀ сегодня" if is_today else ""
-        lines.append(f"\n*{prefix}{dow}, {d.strftime('%d.%m')}{today_mark}*")
-        if day.get("weight"):
-            lines.append(f"  ⚖️ {day['weight']} кг")
+ 
+    # Считаем ожидаемый вес на каждый день (линейная прогрессия)
+    start_w = s.get("startWeight", 0)
+    target_w = s.get("targetWeight", 0)
+    goal_mode = s.get("goal","lose")
+    try:
+        setup_d = datetime.strptime(s.get("setupDate", today_s()), "%Y-%m-%d").date()
+        goal_d  = datetime.strptime(s["goalDate"], "%Y-%m-%d").date()
+        total_days = max((goal_d - setup_d).days, 1)
+        total_diff = target_w - start_w  # negative for lose, positive for gain
+    except:
+        setup_d = today_d; total_days = 60; total_diff = 0
+ 
+    for i in range(6,-1,-1):
+        d = today_d - timedelta(i)
+        ds_val = ds(d)
+        day = days_d.get(ds_val, {})
+        sl_day = sl.get(ds_val, {})
+        dow = weekdays[d.weekday()]
+        is_today = d == today_d
+        mark = "📍" if is_today else "  "
+ 
+        # Expected weight on this day
+        elapsed_i = max((d - setup_d).days, 0)
+        expected_w = round(start_w + total_diff * elapsed_i / total_days, 1) if total_days > 0 else None
+ 
+        lines.append(f"\n{mark} *{dow} {d.strftime('%d.%m')}*{'  ← сегодня' if is_today else ''}")
+ 
+        actual_w = day.get("weight")
+        if actual_w and expected_w:
+            diff_w = round(actual_w - expected_w, 1)
+            if goal_mode == "lose":
+                status = "✅ впереди плана!" if diff_w < -0.2 else ("⚠️ отстаёшь" if diff_w > 0.3 else "👍 по плану")
+            else:
+                status = "✅ впереди!" if diff_w > 0.2 else ("⚠️ отстаёшь" if diff_w < -0.3 else "👍 по плану")
+            lines.append(f"  ⚖️ {actual_w} кг (план: {expected_w}) {status}")
+        elif actual_w:
+            lines.append(f"  ⚖️ {actual_w} кг")
+        elif expected_w and d <= today_d:
+            lines.append(f"  ⚖️ нет данных (план: {expected_w} кг)")
+ 
         if day.get("steps") is not None:
-            goal=u["settings"].get("stepsGoal",10000)
-            ok="✅" if day["steps"]>=goal else "❌"
+            goal_s = s.get("stepsGoal", 10000)
+            ok = "✅" if day["steps"] >= goal_s else "❌"
             lines.append(f"  👟 {day['steps']:,} шагов {ok}")
         if "workout" in day:
             lines.append(f"  💪 {'Тренировка ✅' if day['workout'] else 'Без тренировки'}")
-        if day.get("rating"):
-            lines.append(f"  ⭐ Оценка: {day['rating']}/10")
+        if day.get("kcal_eaten"):
+            nut = calc_nutrition(s)
+            diff_k = day["kcal_eaten"] - nut["kcal"]
+            kmark = "✅" if diff_k <= 0 else "⚠️"
+            lines.append(f"  🍎 {day['kcal_eaten']} ккал {kmark}")
         if sl_day.get("saved"):
-            hrs=sleep_hrs(sl_day["start"],sl_day["end"])
-            _,lbl=sleep_score(hrs,sl_day.get("wakeups",0))
-            lines.append(f"  🌙 {int(hrs)}ч {int((hrs%1)*60)}мин — {lbl}")
+            hrs = sleep_hrs(sl_day["start"], sl_day["end"])
+            _, lbl = sleep_score(hrs, sl_day.get("wakeups", 0))
+            lines.append(f"  🌙 {int(hrs)}ч {int((hrs%1)*60)}м — {lbl}")
         if not any([day.get("weight"), day.get("steps") is not None, "workout" in day, sl_day.get("saved")]):
-            lines.append(f"  ·  нет данных")
-        lines.append("  ─────────────────")
-
-    done=sum(1 for v in days_d.values() if v.get("weight"))
-    strk=streak(days_d)
-    lines.append(f"\n📊 Дней с данными: *{done}* · Стрик: *{strk}* 🔥")
-    msg = await update.message.reply_text("\n".join(lines), parse_mode="Markdown", reply_markup=main_kb())
-    ctx.user_data["last_bot_msg"] = msg.message_id
-
+            lines.append("  · нет данных")
+        lines.append("  ──────────────")
+ 
+    # ── Часть 2: мини-календарь до дедлайна ──
+    lines.append("\n📆 *До цели*")
+    try:
+        goal_d2 = datetime.strptime(s["goalDate"], "%Y-%m-%d").date()
+        dl = (goal_d2 - today_d).days
+        lines.append(f"Осталось *{dl} дней* до {goal_d2.strftime('%d.%m.%Y')}\n")
+ 
+        # Рисуем мини-календарь: следующие недели до дедлайна
+        # Найдём понедельник текущей недели
+        start_cal = today_d - timedelta(today_d.weekday())
+        end_cal = goal_d2
+ 
+        dow_labels = "Пн Вт Ср Чт Пт Сб Вс"
+        lines.append(f"`{dow_labels}`")
+ 
+        cur = start_cal
+        row_cells = []
+        # Pad to Monday
+        while cur <= min(end_cal, today_d + timedelta(weeks=8)):
+            cell_date = cur
+            if cell_date < today_d:
+                day_entry = days_d.get(ds(cell_date), {})
+                if day_entry.get("weight"):
+                    cell = "✅"
+                elif cell_date >= setup_d:
+                    cell = "❌"
+                else:
+                    cell = "· "
+            elif cell_date == today_d:
+                cell = "📍"
+            elif cell_date == goal_d2:
+                cell = "🎯"
+            else:
+                cell = "⬜"
+            row_cells.append(cell)
+            if len(row_cells) == 7:
+                lines.append("`" + " ".join(row_cells) + "`")
+                row_cells = []
+            cur += timedelta(1)
+        if row_cells:
+            while len(row_cells) < 7:
+                row_cells.append("  ")
+            lines.append("`" + " ".join(row_cells) + "`")
+ 
+        lines.append(f"\n✅ был вес · ❌ пропуск · 📍 сегодня · 🎯 дедлайн")
+    except:
+        pass
+ 
+    # Stats
+    done = sum(1 for v in days_d.values() if v.get("weight"))
+    strk = streak(days_d)
+ 
+    # Progress vs plan
+    ws = sorted([(k,v["weight"]) for k,v in days_d.items() if v.get("weight")])
+    plan_txt = ""
+    if ws and expected_w:
+        actual_last = ws[-1][1]
+        exp_today = round(start_w + total_diff * (today_d - setup_d).days / total_days, 1)
+        diff_plan = round(actual_last - exp_today, 1)
+        if goal_mode == "lose":
+            plan_txt = f"\n{'✅ Опережаешь план на ' + str(abs(diff_plan)) + ' кг!' if diff_plan < -0.2 else ('⚠️ Отстаёшь от плана на ' + str(abs(diff_plan)) + ' кг' if diff_plan > 0.3 else '👍 Идёшь по плану')}"
+        else:
+            plan_txt = f"\n{'✅ Опережаешь!' if diff_plan > 0.2 else ('⚠️ Отстаёшь на ' + str(abs(diff_plan)) + ' кг' if diff_plan < -0.3 else '👍 По плану')}"
+ 
+    lines.append(f"\n📊 Стрик: *{strk}* 🔥 · Дней с данными: *{done}*{plan_txt}")
+ 
+    # Send in parts if too long
+    text = "\n".join(lines)
+    if len(text) > 4000:
+        mid = len(lines)//2
+        msg = await update.message.reply_text("\n".join(lines[:mid]), parse_mode="Markdown")
+        ctx.user_data["last_bot_msg"] = msg.message_id
+        msg = await update.message.reply_text("\n".join(lines[mid:]), parse_mode="Markdown", reply_markup=main_kb())
+        ctx.user_data["last_bot_msg"] = msg.message_id
+    else:
+        msg = await update.message.reply_text(text, parse_mode="Markdown", reply_markup=main_kb())
+        ctx.user_data["last_bot_msg"] = msg.message_id
+ 
 # ── ANALYTICS ────────────────────────────────────────────────────
 async def show_analytics(update: Update, ctx):
     data=load(); u=get_user(data,update.effective_user.id)
     days_d=u["days"]; sl=u["sleep"]; s=u["settings"]
     today_d=date.today()
     await delete_prev(ctx, update.effective_chat.id)
-
+ 
     ws=sorted([(k,v["weight"]) for k,v in days_d.items() if v.get("weight")])
     if ws:
         diff=ws[-1][1]-ws[0][1]
@@ -868,7 +1033,7 @@ async def show_analytics(update: Update, ctx):
         progress_txt=f"📈 Набрано: *+{gained:.1f} кг*"
     else:
         progress_txt=f"📉 Сброшено: *{lost:.1f} кг*"
-
+ 
     last14=[(today_d-timedelta(i)).isoformat() for i in range(13,-1,-1)]
     steps14=[days_d.get(d,{}).get("steps",0) for d in last14 if days_d.get(d,{}).get("steps") is not None]
     avg_s=int(sum(steps14)/len(steps14)) if steps14 else 0
@@ -879,12 +1044,12 @@ async def show_analytics(update: Update, ctx):
         else "▅" if (days_d.get(d,{}).get("steps",0) or 0)>=goal_s*0.5
         else "▂" if (days_d.get(d,{}).get("steps",0) or 0)>0 else "░"
         for d in last14[-7:]])
-
+ 
     elapsed=(today_d-datetime.strptime(s.get("setupDate",today_s()),"%Y-%m-%d").date()).days+1
     done=sum(1 for v in days_d.values() if v.get("weight"))
     disc=int(done/max(elapsed,1)*100)
     strk=streak(days_d)
-
+ 
     sl_entries=[v for v in sl.values() if v.get("saved")]
     if sl_entries:
         hrs_l=[sleep_hrs(e["start"],e["end"]) for e in sl_entries]
@@ -892,7 +1057,7 @@ async def show_analytics(update: Update, ctx):
         avg_sc=int(sum(e.get("score",0) for e in sl_entries)/len(sl_entries))
         sl_txt=f"*{avg_sl:.1f}ч* · оценка *{avg_sc}/100*"
     else: sl_txt="нет данных"
-
+ 
     nut=calc_nutrition(s)
     tw=[days_d.get((today_d-timedelta(i)).isoformat(),{}) for i in range(7)]
     lw=[days_d.get((today_d-timedelta(i+7)).isoformat(),{}) for i in range(7)]
@@ -900,7 +1065,7 @@ async def show_analytics(update: Update, ctx):
     lw_s=[e.get("steps",0) for e in lw if e.get("steps")]
     tw_a=int(sum(tw_s)/len(tw_s)) if tw_s else 0
     lw_a=int(sum(lw_s)/len(lw_s)) if lw_s else 0
-
+ 
     # Forecast
     fc=""
     if len(ws)>=3:
@@ -910,11 +1075,11 @@ async def show_analytics(update: Update, ctx):
             dn=int(to_go/abs(rate))
             dl=days_left(s)
             fc=f"\n🔮 Прогноз: цель через *{dn} дн.* {'✓' if dn<=dl else '— нужно ускориться!'}"
-
+ 
     msg = await update.message.reply_text(
         f"📈 *Аналитика · {goal_emoji(goal_mode)}*\n\n"
         f"⚖️ Вес: {w_txt}\n{progress_txt}{fc}\n\n"
-        f"🍎 Норма: *{nut['kcal']} ккал* | Б{nut['protein']} Ж{nut['fat']} У{nut['carbs']}\n\n"
+        f"🍎 Норма: *{nut['kcal']} ккал/день*\n\n"
         f"👟 Шаги (14 дн.) · среднее *{avg_s:,}* · норма *{goal_days}* дней\n"
         f"`{chart}` ← 7 дней\n\n"
         f"📊 Дисциплина *{disc}%* · Стрик *{strk}* 🔥\n\n"
@@ -924,13 +1089,13 @@ async def show_analytics(update: Update, ctx):
         f"Дней с данными: *{sum(1 for e in tw if e.get('weight'))}* vs *{sum(1 for e in lw if e.get('weight'))}*",
         parse_mode="Markdown", reply_markup=main_kb())
     ctx.user_data["last_bot_msg"] = msg.message_id
-
+ 
 # ── GAME ─────────────────────────────────────────────────────────
 async def show_game(update: Update, ctx):
     data=load(); u=get_user(data,update.effective_user.id)
     xp=u.get("xp",0); days_d=u["days"]; unlocked=u.get("achievements",[])
     await delete_prev(ctx, update.effective_chat.id)
-
+ 
     lvls=[(0,"⚡ Новичок",150),(150,"🥊 Боец",350),(350,"🏃 Атлет",700),(700,"🏆 Чемпион",1500),(1500,"🤖 Машина",9999)]
     cur=lvls[0]; nxt=lvls[1]
     for i,(mn,nm,_) in enumerate(lvls):
@@ -960,7 +1125,7 @@ async def show_game(update: Update, ctx):
         f"*Как получить XP:*\n+5 вес · +10 шаги (норма) · +15 тренировка\n+5 оценка 8+ · +50 стрик 7д · +10 сон",
         parse_mode="Markdown", reply_markup=main_kb())
     ctx.user_data["last_bot_msg"] = msg.message_id
-
+ 
 # ── SETTINGS ─────────────────────────────────────────────────────
 async def show_settings(update: Update, ctx):
     data=load(); u=get_user(data,update.effective_user.id); s=u["settings"]
@@ -985,7 +1150,7 @@ async def show_settings(update: Update, ctx):
         f"💾 Данные хранятся на сервере Railway",
         parse_mode="Markdown", reply_markup=kb)
     ctx.user_data["last_bot_msg"] = msg.message_id
-
+ 
 async def settings_cb(update: Update, ctx):
     q=update.callback_query; await q.answer()
     if q.data=="export_data":
@@ -1001,7 +1166,7 @@ async def settings_cb(update: Update, ctx):
                 [InlineKeyboardButton("⚖️ Оставаться в форме", callback_data="goal_maintain")],
             ]))
         return SETUP_GOAL
-
+ 
 # ── Achievements ─────────────────────────────────────────────────
 def check_achievements(u):
     ul=u.get("achievements",[]); days_d=u["days"]; s=u["settings"]
@@ -1027,7 +1192,7 @@ def check_achievements(u):
     if sum(1 for e in entries if e.get("workout"))>=7: unlock("workout7")
     if any(v.get("score",0)>=85 for v in u.get("sleep",{}).values() if v.get("saved")): unlock("good_sleep")
     u["achievements"]=ul
-
+ 
 # ── Text router ───────────────────────────────────────────────────
 async def handle_text(update: Update, ctx):
     t=update.message.text
@@ -1041,15 +1206,15 @@ async def handle_text(update: Update, ctx):
     else:
         msg = await update.message.reply_text("Выбери раздел 👇", reply_markup=main_kb())
         ctx.user_data["last_bot_msg"] = msg.message_id
-
+ 
 # ── Main ─────────────────────────────────────────────────────────
 def main():
     app=Application.builder().token(TOKEN).build()
-
+ 
     def conv(entries, states):
         return ConversationHandler(entry_points=entries, states=states,
             fallbacks=[CommandHandler("cancel", lambda u,c: ConversationHandler.END)])
-
+ 
     app.add_handler(ConversationHandler(
         entry_points=[CommandHandler("start",cmd_start)],
         states={
@@ -1067,29 +1232,29 @@ def main():
             SETUP_SG:       [MessageHandler(filters.TEXT&~filters.COMMAND, setup_sg)],
         },
         fallbacks=[CommandHandler("start",cmd_start)]))
-
+ 
     app.add_handler(conv(
         [CommandHandler("weight",start_weight), MessageHandler(filters.Regex("⚖️|Вес"),start_weight)],
         {W_DATE:[CallbackQueryHandler(weight_date,pattern="^wd_")],
          W_VAL:[CallbackQueryHandler(weight_val_btn,pattern="^wv_"),
                 MessageHandler(filters.TEXT&~filters.COMMAND,weight_val_text)]}))
-
+ 
     app.add_handler(conv(
         [CommandHandler("steps",start_steps), MessageHandler(filters.Regex("👟|Шаги"),start_steps)],
         {S_DATE:[CallbackQueryHandler(steps_date,pattern="^sd_")],
          S_VAL:[CallbackQueryHandler(steps_val_btn,pattern="^sv_"),
                 MessageHandler(filters.TEXT&~filters.COMMAND,steps_val_text)]}))
-
+ 
     app.add_handler(conv(
         [CommandHandler("workout",start_workout), MessageHandler(filters.Regex("💪|Тренировка"),start_workout)],
         {WO_DATE:[CallbackQueryHandler(workout_date,pattern="^wod_")],
          WO_VAL:[CallbackQueryHandler(workout_val,pattern="^wov_")]}))
-
+ 
     app.add_handler(conv(
         [CommandHandler("rating",start_rating), MessageHandler(filters.Regex("⭐|Оценка"),start_rating)],
         {RT_DATE:[CallbackQueryHandler(rating_date,pattern="^rtd_")],
          RT_VAL:[CallbackQueryHandler(rating_val,pattern="^rtv_")]}))
-
+ 
     app.add_handler(conv(
         [CommandHandler("sleep",start_sleep), MessageHandler(filters.Regex("🌙|Сон"),start_sleep)],
         {SL_DATE:[CallbackQueryHandler(sleep_date,pattern="^sld_")],
@@ -1098,7 +1263,14 @@ def main():
          SL_END:[CallbackQueryHandler(sleep_end_btn,pattern="^slet_"),
                  MessageHandler(filters.TEXT&~filters.COMMAND,sleep_end_text)],
          SL_WAKES:[CallbackQueryHandler(sleep_wakes,pattern="^slw_")]}))
-
+ 
+    app.add_handler(conv(
+        [CallbackQueryHandler(food_log_start, pattern="^food_(today|other)$"),
+         CommandHandler("food", show_calories)],
+        {FOOD_DATE:[CallbackQueryHandler(food_date_select, pattern="^food_"),
+                    MessageHandler(filters.TEXT&~filters.COMMAND, food_val)],
+         FOOD_VAL:[MessageHandler(filters.TEXT&~filters.COMMAND, food_val)]}))
+ 
     app.add_handler(CallbackQueryHandler(settings_cb, pattern="^(reset_setup|export_data)$"))
     app.add_handler(CallbackQueryHandler(settings_cb, pattern="^goal_"))
     app.add_handler(CommandHandler("home",show_home))
@@ -1109,6 +1281,6 @@ def main():
     app.add_handler(CommandHandler("settings",show_settings))
     app.add_handler(MessageHandler(filters.TEXT&~filters.COMMAND, handle_text))
     app.run_polling(drop_pending_updates=True)
-
+ 
 if __name__=="__main__":
     main()
