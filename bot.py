@@ -4,13 +4,13 @@ from datetime import datetime, date, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, WebAppInfo
 from telegram.ext import (Application, CommandHandler, MessageHandler,
     CallbackQueryHandler, ConversationHandler, filters, JobQueue)
- 
+
 logging.basicConfig(level=logging.INFO)
 TOKEN    = os.environ.get("BOT_TOKEN", "")
 DATA_FILE = "data.json"
 WEBAPP_URL = os.environ.get("WEBAPP_URL", "")  # Set this in Railway Variables
 TZ = ZoneInfo("Europe/Istanbul")
- 
+
 # ── States ────────────────────────────────────────────────────────
 (S_GOAL,S_NAME,S_AGE,S_GENDER,S_HEIGHT,S_CW,S_TW,S_DATE,S_ACT,S_STEPS) = range(10)
 W_DATE,W_VAL           = 20,21
@@ -18,7 +18,7 @@ ST_DATE,ST_VAL         = 30,31
 WO_DATE,WO_VAL         = 40,41
 SL_DATE,SL_ST,SL_EN,SL_WK = 50,51,52,53
 RT_DATE,RT_VAL         = 60,61
- 
+
 # ── Storage ───────────────────────────────────────────────────────
 def load():
     try:
@@ -26,33 +26,33 @@ def load():
             with open(DATA_FILE,"r",encoding="utf-8") as f: return json.load(f)
     except: pass
     return {}
- 
+
 def save(data):
     with open(DATA_FILE,"w",encoding="utf-8") as f:
         json.dump(data,f,ensure_ascii=False,indent=2)
- 
+
 def get_user(data,uid):
     uid=str(uid)
     if uid not in data:
         data[uid]={"settings":{},"days":{},"sleep":{},"xp":0,"achievements":[]}
     return data[uid]
- 
+
 def get_day(u,d):
     if d not in u["days"]: u["days"][d]={}
     return u["days"][d]
- 
+
 def tds(): return datetime.now(TZ).date().isoformat()
 def dstr(d): return d.isoformat() if isinstance(d,date) else d
- 
+
 # ── Helpers ───────────────────────────────────────────────────────
 async def del_msg(bot,chat_id,msg_id):
     try: await bot.delete_message(chat_id,msg_id)
     except: pass
- 
+
 async def del_prev(ctx,chat_id):
     mid=ctx.user_data.get("lm")
     if mid: await del_msg(ctx.bot,chat_id,mid)
- 
+
 async def reply(update,ctx,text,kb=None,pm="Markdown"):
     await del_prev(ctx,update.effective_chat.id)
     kw={"text":text,"parse_mode":pm}
@@ -61,10 +61,10 @@ async def reply(update,ctx,text,kb=None,pm="Markdown"):
     msg=await update.message.reply_text(**kw)
     ctx.user_data["lm"]=msg.message_id
     return msg
- 
+
 def pbar(v,mx,n=8):
     f=int((v/max(mx,1))*n); return "▓"*f+"░"*(n-f)
- 
+
 def streak(days):
     d=date.today()
     if not days.get(dstr(d),{}).get("weight"): d-=timedelta(1)
@@ -73,13 +73,13 @@ def streak(days):
         if days.get(dstr(d),{}).get("weight"): n+=1; d-=timedelta(1)
         else: break
     return n
- 
+
 def sleep_hrs(s,e):
     sh,sm=map(int,s.split(":")); eh,em=map(int,e.split(":"))
     a=sh*60+sm; b=eh*60+em
     if b<=a: b+=1440
     return (b-a)/60
- 
+
 def sleep_score(hrs,w):
     d=50 if 7<=hrs<=9 else 40 if hrs>=6.5 else 28 if hrs>=6 else 15 if hrs>=5 else 5
     ws=[50,38,26,16,10,5,0][min(w,6)]; t=d+ws
@@ -87,7 +87,7 @@ def sleep_score(hrs,w):
     if t>=70: return t,"😴 Хороший"
     if t>=50: return t,"😐 Средний"
     return t,"😮 Плохой"
- 
+
 def calc_kcal(s):
     age=s.get("age",25); h=s.get("height",175)
     w=s.get("currentWeight",s.get("startWeight",75))
@@ -107,7 +107,7 @@ def calc_kcal(s):
         kcal=int(tdee+surplus)
     else: kcal=int(tdee)
     return int(bmr),int(tdee),kcal
- 
+
 def dlabel(d_str):
     try:
         d=datetime.strptime(d_str,"%Y-%m-%d").date()
@@ -115,14 +115,14 @@ def dlabel(d_str):
         if d==date.today()-timedelta(1): return "вчера"
         return d.strftime("%d.%m.%Y")
     except: return d_str
- 
+
 def days_left(s):
     try: return max(0,(datetime.strptime(s["goalDate"],"%Y-%m-%d").date()-date.today()).days)
     except: return 0
- 
+
 def goal_name(g): return {"lose":"📉 Похудение","gain":"📈 Набор массы","maintain":"⚖️ Поддержание"}.get(g,"—")
 def act_name(a): return {1.2:"🛋 Минимум",1.375:"🚶 Лёгкая",1.55:"🏃 Средняя",1.725:"💪 Высокая",1.9:"🏋️ Очень высокая"}.get(a,"—")
- 
+
 def weight_comment(diff, goal):
     """Motivational comment on weight change"""
     if diff is None: return ""
@@ -138,7 +138,7 @@ def weight_comment(diff, goal):
         if diff == 0:   return "\n⚖️ Без изменений — добавь калорий"
         return "\n⚠️ Вес упал — добавь больше еды"
     return ""
- 
+
 def forecast_weight(days_d, s):
     """Forecast based on last 7 days trend"""
     ws=sorted([(k,v["weight"]) for k,v in days_d.items() if v.get("weight")])
@@ -153,7 +153,7 @@ def forecast_weight(days_d, s):
     if to_go<=0: return 0,rate
     days_needed=int(abs(to_go/rate))
     return days_needed,rate
- 
+
 def main_kb():
     return ReplyKeyboardMarkup([
         ["🏠 Главная",    "📊 Статус"],
@@ -163,7 +163,7 @@ def main_kb():
         ["📈 Аналитика",  "⚙️ Настройки"],
         ["📱 Мини-апп"],
     ],resize_keyboard=True)
- 
+
 def day_kb(prefix):
     today_d=date.today()
     labels=["Сегодня","Вчера","2 дня назад","3 дня назад","4 дня назад"]
@@ -172,19 +172,19 @@ def day_kb(prefix):
          callback_data=f"{prefix}_{dstr(today_d-timedelta(i))}")]
         for i in range(5)
     ])
- 
+
 def parse_float(text):
     """Robust float parsing: handles 76.3, 76,3, 76"""
     clean=text.strip().replace(",",".").replace(" ","")
     return float(clean)
- 
+
 def parse_steps(text):
     """Parse steps: handles 8500, 8к, 8.5к, 10000"""
     clean=text.strip().lower().replace(" ","").replace(",",".")
     if clean.endswith("к") or clean.endswith("k"):
         return int(float(clean[:-1])*1000)
     return int(float(clean))
- 
+
 # ── QUICK INPUT — detect number in free text ──────────────────────
 async def try_quick_input(update: Update, ctx):
     """
@@ -194,7 +194,7 @@ async def try_quick_input(update: Update, ctx):
     t=update.message.text.strip()
     data=load(); u=get_user(data,update.effective_user.id)
     if not u["settings"].get("startWeight"): return False
- 
+
     # Try weight (30–250, float, likely has decimal or is in weight range)
     try:
         val=parse_float(t)
@@ -217,7 +217,7 @@ async def try_quick_input(update: Update, ctx):
             ctx.user_data["lm"]=msg.message_id
             return True
     except: pass
- 
+
     # Try steps (large integer or с "к")
     try:
         lower=t.lower()
@@ -239,9 +239,9 @@ async def try_quick_input(update: Update, ctx):
                 ctx.user_data["lm"]=msg.message_id
                 return True
     except: pass
- 
+
     return False
- 
+
 # ═══════════════════════════════════════════════════════════════════
 # SETUP
 # ═══════════════════════════════════════════════════════════════════
@@ -257,20 +257,20 @@ async def cmd_start(update: Update, ctx):
     ])
     msg=await update.message.reply_text("🔥 *FIT TRACKER*\n\nВыбери цель:",parse_mode="Markdown",reply_markup=kb)
     ctx.user_data["lm"]=msg.message_id; return S_GOAL
- 
+
 async def s_goal(update: Update, ctx):
     q=update.callback_query; await q.answer()
     ctx.user_data["goal"]=q.data.replace("g_","")
     await q.edit_message_text(f"*{goal_name(ctx.user_data['goal'])}* ✓\n\nКак тебя зовут?",parse_mode="Markdown")
     return S_NAME
- 
+
 async def s_name(update: Update, ctx):
     ctx.user_data["name"]=update.message.text.strip()[:20]
     await del_msg(ctx.bot,update.effective_chat.id,update.message.message_id)
     await del_prev(ctx,update.effective_chat.id)
     msg=await update.message.reply_text(f"Привет, *{ctx.user_data['name']}*! 👋\n\nСколько лет?",parse_mode="Markdown")
     ctx.user_data["lm"]=msg.message_id; return S_AGE
- 
+
 async def s_age(update: Update, ctx):
     await del_msg(ctx.bot,update.effective_chat.id,update.message.message_id)
     try:
@@ -286,14 +286,14 @@ async def s_age(update: Update, ctx):
     except:
         msg=await update.message.reply_text("❌ Введи число, например: 25")
         ctx.user_data["lm"]=msg.message_id; return S_AGE
- 
+
 async def s_gender(update: Update, ctx):
     q=update.callback_query; await q.answer()
     ctx.user_data["gender"]=q.data.replace("gen_","")
     g="👨 Мужской" if ctx.user_data["gender"]=="male" else "👩 Женский"
     await q.edit_message_text(f"*{g}* ✓\n\nРост (см), например: `178`",parse_mode="Markdown")
     return S_HEIGHT
- 
+
 async def s_height(update: Update, ctx):
     await del_msg(ctx.bot,update.effective_chat.id,update.message.message_id)
     try:
@@ -305,7 +305,7 @@ async def s_height(update: Update, ctx):
     except:
         msg=await update.message.reply_text("❌ Рост от 100 до 250, например: 178")
         ctx.user_data["lm"]=msg.message_id; return S_HEIGHT
- 
+
 async def s_cw(update: Update, ctx):
     await del_msg(ctx.bot,update.effective_chat.id,update.message.message_id)
     try:
@@ -321,7 +321,7 @@ async def s_cw(update: Update, ctx):
     except:
         msg=await update.message.reply_text("❌ Введи число, например: 82.5")
         ctx.user_data["lm"]=msg.message_id; return S_CW
- 
+
 async def s_tw(update: Update, ctx):
     await del_msg(ctx.bot,update.effective_chat.id,update.message.message_id)
     try:
@@ -336,7 +336,7 @@ async def s_tw(update: Update, ctx):
         hint="меньше текущего" if ctx.user_data.get("goal")=="lose" else "больше текущего"
         msg=await update.message.reply_text(f"❌ Цель должна быть {hint}. Попробуй:")
         ctx.user_data["lm"]=msg.message_id; return S_TW
- 
+
 async def _ask_date(update,ctx):
     today_d=date.today()
     presets=[
@@ -351,7 +351,7 @@ async def _ask_date(update,ctx):
     rows.append([InlineKeyboardButton("✏️ Своя дата",callback_data="gd_manual")])
     msg=await update.message.reply_text("📅 *До какой даты цель?*",parse_mode="Markdown",reply_markup=InlineKeyboardMarkup(rows))
     ctx.user_data["lm"]=msg.message_id; return S_DATE
- 
+
 async def s_date_btn(update: Update, ctx):
     q=update.callback_query; await q.answer()
     if q.data=="gd_manual":
@@ -367,7 +367,7 @@ async def s_date_btn(update: Update, ctx):
             [InlineKeyboardButton("🏋️ Очень высокая (2×день)",callback_data="act_1.9")],
         ]))
     return S_ACT
- 
+
 async def s_date_txt(update: Update, ctx):
     await del_msg(ctx.bot,update.effective_chat.id,update.message.message_id)
     try:
@@ -387,13 +387,13 @@ async def s_date_txt(update: Update, ctx):
     except:
         msg=await update.message.reply_text("❌ Формат: ДД.ММ.ГГГГ, например: 31.12.2026")
         ctx.user_data["lm"]=msg.message_id; return S_DATE
- 
+
 async def s_act(update: Update, ctx):
     q=update.callback_query; await q.answer()
     ctx.user_data["activity"]=float(q.data.replace("act_",""))
     await q.edit_message_text(f"*{act_name(ctx.user_data['activity'])}* ✓\n\nНорма шагов в день (например: `10000`):",parse_mode="Markdown")
     return S_STEPS
- 
+
 async def s_steps(update: Update, ctx):
     await del_msg(ctx.bot,update.effective_chat.id,update.message.message_id)
     try:
@@ -423,7 +423,7 @@ async def s_steps(update: Update, ctx):
     except:
         msg=await update.message.reply_text("❌ Введи число шагов, например: 10000")
         ctx.user_data["lm"]=msg.message_id; return S_STEPS
- 
+
 # ═══════════════════════════════════════════════════════════════════
 # HOME
 # ═══════════════════════════════════════════════════════════════════
@@ -432,24 +432,24 @@ async def show_home(update: Update, ctx):
     if not s.get("startWeight"):
         await update.message.reply_text("Сначала /start"); return
     await del_prev(ctx,update.effective_chat.id)
- 
+
     days_d=u["days"]; td=tds(); td_day=days_d.get(td,{})
     ws=sorted([(k,v["weight"]) for k,v in days_d.items() if v.get("weight")],reverse=True)
     cur_w=ws[0][1] if ws else s["startWeight"]
     s["currentWeight"]=cur_w
     bmr,tdee,kcal=calc_kcal(s)
     goal=s.get("goal","lose")
- 
+
     if goal=="gain":
         prog=f"📈 Набрано: +{max(0,cur_w-s['startWeight']):.1f} кг · осталось: {abs(cur_w-s['targetWeight']):.1f} кг"
     else:
         prog=f"📉 Сброшено: {max(0,s['startWeight']-cur_w):.1f} кг · осталось: {abs(cur_w-s['targetWeight']):.1f} кг"
- 
+
     # Progress % toward goal
     total_diff=abs(s["startWeight"]-s["targetWeight"])
     done_diff=abs(s["startWeight"]-cur_w) if goal!="gain" else abs(cur_w-s["startWeight"])
     goal_pct=min(100,int(done_diff/max(total_diff,0.1)*100))
- 
+
     try:
         sd=datetime.strptime(s.get("setupDate",tds()),"%Y-%m-%d").date()
         gd=datetime.strptime(s["goalDate"],"%Y-%m-%d").date()
@@ -457,9 +457,9 @@ async def show_home(update: Update, ctx):
         time_pct=min(100,int(elapsed/max(total_days,1)*100))
         pb_time=pbar(elapsed,total_days,10)
     except: time_pct=0; pb_time="░"*10
- 
+
     strk=streak(days_d); xp=u.get("xp",0)
- 
+
     # Forecast
     dn,rate=forecast_weight(days_d,s)
     fc_txt=""
@@ -468,13 +468,13 @@ async def show_home(update: Update, ctx):
         if dn==0: fc_txt="\n🎯 Цель достигнута!"
         elif dn<=dl: fc_txt=f"\n🔮 Прогноз: цель через *{dn} дн.* ✓ (темп {rate*7:.2f} кг/нед)"
         else: fc_txt=f"\n🔮 Прогноз: {dn} дн. → нужно ускориться на {rate*7:.2f} кг/нед"
- 
+
     # Today quick status
     w_ok="✅" if td_day.get("weight") else "⬜"
     s_ok="✅" if td_day.get("steps") is not None else "⬜"
     wo_ok="✅" if td_day.get("workout") else "⬜"
     sl_ok="✅" if u["sleep"].get(td,{}).get("saved") else "⬜"
- 
+
     msg=await update.message.reply_text(
         f"🏠 *{s.get('name','')} · {datetime.now(TZ).strftime('%d.%m.%Y %H:%M')}*\n\n"
         f"{goal_name(goal)} · осталось *{days_left(s)} дн.*\n"
@@ -486,7 +486,7 @@ async def show_home(update: Update, ctx):
         f"💡 Просто напиши *76.5* или *8500* — запишу автоматически",
         parse_mode="Markdown",reply_markup=main_kb())
     ctx.user_data["lm"]=msg.message_id
- 
+
 # ═══════════════════════════════════════════════════════════════════
 # STATUS — quick day summary
 # ═══════════════════════════════════════════════════════════════════
@@ -495,10 +495,10 @@ async def show_status(update: Update, ctx):
     if not s.get("startWeight"):
         await update.message.reply_text("Сначала /start"); return
     await del_prev(ctx,update.effective_chat.id)
- 
+
     td=tds(); day=u["days"].get(td,{}); sl=u["sleep"].get(td,{})
     score=0; lines=[]
- 
+
     # Weight
     if day.get("weight"):
         score+=1
@@ -511,7 +511,7 @@ async def show_status(update: Update, ctx):
         lines.append(f"✅ Вес: *{day['weight']} кг*{diff_txt}{comment}")
     else:
         lines.append("⬜ Вес: *не введён* → напиши число, например `76.5`")
- 
+
     # Steps
     if day.get("steps") is not None:
         score+=1
@@ -521,14 +521,14 @@ async def show_status(update: Update, ctx):
         lines.append(f"✅ Шаги: *{day['steps']:,}* {pb} {tag}")
     else:
         lines.append("⬜ Шаги: *не введены* → напиши число, например `8500`")
- 
+
     # Workout
     if "workout" in day:
         score+=1
         lines.append(f"✅ Тренировка: *{'Да 💪' if day['workout'] else 'Нет'}*")
     else:
         lines.append("⬜ Тренировка: *не отмечена*")
- 
+
     # Sleep
     if sl.get("saved"):
         score+=1
@@ -537,16 +537,16 @@ async def show_status(update: Update, ctx):
         lines.append(f"✅ Сон: *{int(hrs)}ч {int((hrs%1)*60)}м* — {lbl} ({sc}/100)")
     else:
         lines.append("⬜ Сон: *не записан*")
- 
+
     score_bar=["😴 Ничего","😐 Начало","👍 Хорошо","💪 Отлично","🔥 Идеальный день!"][score]
- 
+
     msg=await update.message.reply_text(
         f"📊 *Статус — {date.today().strftime('%d.%m')}*\n"
         f"{'⭐'*score}{'☆'*(4-score)} {score}/4 — {score_bar}\n\n"
         +"\n".join(lines),
         parse_mode="Markdown",reply_markup=main_kb())
     ctx.user_data["lm"]=msg.message_id
- 
+
 # ═══════════════════════════════════════════════════════════════════
 # WEIGHT
 # ═══════════════════════════════════════════════════════════════════
@@ -554,16 +554,16 @@ async def start_weight(update: Update, ctx):
     await del_prev(ctx,update.effective_chat.id)
     data=load(); u=get_user(data,update.effective_user.id)
     td=tds()
- 
+
     # "Как вчера" button
     yesterday=dstr(date.today()-timedelta(1))
     prev_w=u["days"].get(yesterday,{}).get("weight")
     existing=u["days"].get(td,{}).get("weight")
- 
+
     rows=[]
     if prev_w:
         rows.append([InlineKeyboardButton(f"📋 Как вчера ({prev_w} кг)",callback_data=f"wv_{prev_w}_today")])
- 
+
     # Quick buttons around current/last weight
     base=existing if existing else (prev_w if prev_w else u["settings"].get("startWeight",80))
     weights=[round(base-0.4+i*0.1,1) for i in range(9)]
@@ -574,14 +574,14 @@ async def start_weight(update: Update, ctx):
     if row: rows.append(row)
     rows.append([InlineKeyboardButton("📅 За другой день",callback_data="wd_other")])
     rows.append([InlineKeyboardButton("✏️ Ввести другое число",callback_data="wv_m")])
- 
+
     hint=f"\nСейчас: *{existing} кг*" if existing else ""
     msg=await update.message.reply_text(
         f"⚖️ *Вес{hint}*\n\nВыбери или нажми ✏️:",
         parse_mode="Markdown",reply_markup=InlineKeyboardMarkup(rows))
     ctx.user_data["lm"]=msg.message_id; ctx.user_data["wd"]=td
     return W_VAL
- 
+
 async def w_date(update: Update, ctx):
     q=update.callback_query; await q.answer()
     d=q.data.replace("wd_",""); ctx.user_data["wd"]=d
@@ -599,7 +599,7 @@ async def w_date(update: Update, ctx):
     await q.edit_message_text(f"⚖️ Вес за *{dlabel(d)}*{hint}\n\nВыбери:",
         parse_mode="Markdown",reply_markup=InlineKeyboardMarkup(rows))
     return W_VAL
- 
+
 async def w_val_btn(update: Update, ctx):
     q=update.callback_query; await q.answer()
     if q.data=="wv_m":
@@ -614,7 +614,7 @@ async def w_val_btn(update: Update, ctx):
     d=parts[2] if parts[2]!="today" else tds()
     ctx.user_data["wd"]=d
     return await _save_w(q,ctx,w,True)
- 
+
 async def w_val_txt(update: Update, ctx):
     await del_msg(ctx.bot,update.effective_chat.id,update.message.message_id)
     try:
@@ -625,7 +625,7 @@ async def w_val_txt(update: Update, ctx):
         msg=await update.message.reply_text(
             f"❌ Не могу прочитать `{raw}`\n\nНапиши число: `76.5` или `76,5`",parse_mode="Markdown")
         ctx.user_data["lm"]=msg.message_id; return W_VAL
- 
+
 async def _save_w(obj,ctx,w,is_q):
     d=ctx.user_data.get("wd",tds()); uid=obj.from_user.id
     data=load(); u=get_user(data,uid)
@@ -647,7 +647,7 @@ async def _save_w(obj,ctx,w,is_q):
         msg=await obj.message.reply_text(text,parse_mode="Markdown",reply_markup=main_kb())
     ctx.user_data["lm"]=msg.message_id
     return ConversationHandler.END
- 
+
 # ═══════════════════════════════════════════════════════════════════
 # STEPS
 # ═══════════════════════════════════════════════════════════════════
@@ -657,7 +657,7 @@ async def start_steps(update: Update, ctx):
     td=tds(); existing=u["days"].get(td,{}).get("steps")
     yesterday=dstr(date.today()-timedelta(1))
     prev_s=u["days"].get(yesterday,{}).get("steps")
- 
+
     presets=[0,3000,5000,6000,7000,8000,9000,10000,12000,15000,20000]
     rows=[]; row=[]
     if prev_s is not None:
@@ -669,14 +669,14 @@ async def start_steps(update: Update, ctx):
     if row: rows.append(row)
     rows.append([InlineKeyboardButton("📅 За другой день",callback_data="sd_other")])
     rows.append([InlineKeyboardButton("✏️ Ввести точно",callback_data="sv_m")])
- 
+
     hint=f"\nСейчас: *{existing:,}*" if existing is not None else ""
     ctx.user_data["sd"]=td
     msg=await update.message.reply_text(
         f"👟 *Шаги{hint}*\n\nВыбери или ✏️:",
         parse_mode="Markdown",reply_markup=InlineKeyboardMarkup(rows))
     ctx.user_data["lm"]=msg.message_id; return ST_VAL
- 
+
 async def st_date(update: Update, ctx):
     q=update.callback_query; await q.answer()
     d=q.data.replace("sd_",""); ctx.user_data["sd"]=d
@@ -690,7 +690,7 @@ async def st_date(update: Update, ctx):
     await q.edit_message_text(f"👟 Шаги за *{dlabel(d)}*\n\nВыбери:",
         parse_mode="Markdown",reply_markup=InlineKeyboardMarkup(rows))
     return ST_VAL
- 
+
 async def st_val_btn(update: Update, ctx):
     q=update.callback_query; await q.answer()
     if q.data=="sv_m":
@@ -703,7 +703,7 @@ async def st_val_btn(update: Update, ctx):
     s2=int(parts[1]); d=parts[2] if parts[2]!="today" else tds()
     ctx.user_data["sd"]=d
     return await _save_st(q,ctx,s2,True)
- 
+
 async def st_val_txt(update: Update, ctx):
     await del_msg(ctx.bot,update.effective_chat.id,update.message.message_id)
     try:
@@ -712,7 +712,7 @@ async def st_val_txt(update: Update, ctx):
     except:
         msg=await update.message.reply_text("❌ Введи число шагов: `8500` или `8к`",parse_mode="Markdown")
         ctx.user_data["lm"]=msg.message_id; return ST_VAL
- 
+
 async def _save_st(obj,ctx,s2,is_q):
     d=ctx.user_data.get("sd",tds()); uid=obj.from_user.id
     data=load(); u=get_user(data,uid)
@@ -730,7 +730,7 @@ async def _save_st(obj,ctx,s2,is_q):
         msg=await obj.message.reply_text(text,parse_mode="Markdown",reply_markup=main_kb())
     ctx.user_data["lm"]=msg.message_id
     return ConversationHandler.END
- 
+
 # ═══════════════════════════════════════════════════════════════════
 # WORKOUT
 # ═══════════════════════════════════════════════════════════════════
@@ -738,7 +738,7 @@ async def start_workout(update: Update, ctx):
     await del_prev(ctx,update.effective_chat.id)
     msg=await update.message.reply_text("💪 *Тренировка*\n\nЗа какой день?",parse_mode="Markdown",reply_markup=day_kb("wod"))
     ctx.user_data["lm"]=msg.message_id; return WO_DATE
- 
+
 async def wo_date(update: Update, ctx):
     q=update.callback_query; await q.answer()
     d=q.data.replace("wod_",""); ctx.user_data["wod"]=d
@@ -747,7 +747,7 @@ async def wo_date(update: Update, ctx):
             InlineKeyboardButton("💪 Да",callback_data="wov_y"),
             InlineKeyboardButton("😴 Нет",callback_data="wov_n")]]))
     return WO_VAL
- 
+
 async def wo_val(update: Update, ctx):
     q=update.callback_query; await q.answer()
     wo=q.data=="wov_y"; d=ctx.user_data["wod"]
@@ -761,7 +761,7 @@ async def wo_val(update: Update, ctx):
     msg=await q.message.reply_text("Выбери:",reply_markup=main_kb())
     ctx.user_data["lm"]=msg.message_id
     return ConversationHandler.END
- 
+
 # ═══════════════════════════════════════════════════════════════════
 # SLEEP
 # ═══════════════════════════════════════════════════════════════════
@@ -769,7 +769,7 @@ async def start_sleep(update: Update, ctx):
     await del_prev(ctx,update.effective_chat.id)
     msg=await update.message.reply_text("🌙 *Сон*\n\nЗа какой день?",parse_mode="Markdown",reply_markup=day_kb("sld"))
     ctx.user_data["lm"]=msg.message_id; return SL_DATE
- 
+
 async def sl_date(update: Update, ctx):
     q=update.callback_query; await q.answer()
     d=q.data.replace("sld_",""); ctx.user_data["sld"]=d
@@ -783,7 +783,7 @@ async def sl_date(update: Update, ctx):
     await q.edit_message_text(f"🌙 Сон за *{dlabel(d)}*\n\n😴 Лёг в:",
         parse_mode="Markdown",reply_markup=InlineKeyboardMarkup(rows))
     return SL_ST
- 
+
 async def sl_st_btn(update: Update, ctx):
     q=update.callback_query; await q.answer()
     if q.data=="slst_m":
@@ -791,7 +791,7 @@ async def sl_st_btn(update: Update, ctx):
     t=q.data.replace("slst_",""); ctx.user_data["slst"]=t
     await q.edit_message_text(f"😴 Лёг в *{t}*\n\n⏰ Проснулся в:",parse_mode="Markdown",reply_markup=_wake_kb())
     return SL_EN
- 
+
 async def sl_st_txt(update: Update, ctx):
     await del_msg(ctx.bot,update.effective_chat.id,update.message.message_id)
     try:
@@ -803,7 +803,7 @@ async def sl_st_txt(update: Update, ctx):
     except:
         msg=await update.message.reply_text("❌ Формат ЧЧ:ММ, например: 23:30")
         ctx.user_data["lm"]=msg.message_id; return SL_ST
- 
+
 def _wake_kb():
     presets=["05:00","05:30","06:00","06:30","07:00","07:30","08:00","08:30","09:00","10:00"]
     rows=[]; row=[]
@@ -813,13 +813,13 @@ def _wake_kb():
     if row: rows.append(row)
     rows.append([InlineKeyboardButton("✏️ Другое",callback_data="slen_m")])
     return InlineKeyboardMarkup(rows)
- 
+
 async def sl_en_btn(update: Update, ctx):
     q=update.callback_query; await q.answer()
     if q.data=="slen_m":
         await q.edit_message_text("⏰ Введи время пробуждения (ЧЧ:ММ):",parse_mode="Markdown"); return SL_EN
     return await _proc_sleep_end(q,ctx,q.data.replace("slen_",""),True)
- 
+
 async def sl_en_txt(update: Update, ctx):
     await del_msg(ctx.bot,update.effective_chat.id,update.message.message_id)
     try:
@@ -828,7 +828,7 @@ async def sl_en_txt(update: Update, ctx):
     except:
         msg=await update.message.reply_text("❌ Формат ЧЧ:ММ, например: 07:30")
         ctx.user_data["lm"]=msg.message_id; return SL_EN
- 
+
 async def _proc_sleep_end(obj,ctx,t,is_q):
     start=ctx.user_data["slst"]; hrs=sleep_hrs(start,t)
     if hrs<1 or hrs>18:
@@ -849,7 +849,7 @@ async def _proc_sleep_end(obj,ctx,t,is_q):
         msg=await obj.message.reply_text(text,parse_mode="Markdown",reply_markup=InlineKeyboardMarkup(rows))
         ctx.user_data["lm"]=msg.message_id
     return SL_WK
- 
+
 async def sl_wk(update: Update, ctx):
     q=update.callback_query; await q.answer()
     w=int(q.data.replace("slw_","")); d=ctx.user_data["sld"]
@@ -872,7 +872,7 @@ async def sl_wk(update: Update, ctx):
     msg=await q.message.reply_text("Выбери:",reply_markup=main_kb())
     ctx.user_data["lm"]=msg.message_id
     return ConversationHandler.END
- 
+
 # ═══════════════════════════════════════════════════════════════════
 # RATING
 # ═══════════════════════════════════════════════════════════════════
@@ -880,7 +880,7 @@ async def start_rating(update: Update, ctx):
     await del_prev(ctx,update.effective_chat.id)
     msg=await update.message.reply_text("⭐ *Оценка дня*\n\nЗа какой день?",parse_mode="Markdown",reply_markup=day_kb("rtd"))
     ctx.user_data["lm"]=msg.message_id; return RT_DATE
- 
+
 async def rt_date(update: Update, ctx):
     q=update.callback_query; await q.answer()
     d=q.data.replace("rtd_",""); ctx.user_data["rtd"]=d
@@ -888,7 +888,7 @@ async def rt_date(update: Update, ctx):
           [InlineKeyboardButton(str(i),callback_data=f"rtv_{i}_{d}") for i in range(6,11)]]
     await q.edit_message_text(f"⭐ Оценка за *{dlabel(d)}* (1–10):",parse_mode="Markdown",reply_markup=InlineKeyboardMarkup(rows))
     return RT_VAL
- 
+
 async def rt_val(update: Update, ctx):
     q=update.callback_query; await q.answer()
     parts=q.data.split("_",2); r=int(parts[1]); d=parts[2]
@@ -902,7 +902,7 @@ async def rt_val(update: Update, ctx):
     msg=await q.message.reply_text("Выбери:",reply_markup=main_kb())
     ctx.user_data["lm"]=msg.message_id
     return ConversationHandler.END
- 
+
 # ═══════════════════════════════════════════════════════════════════
 # CALENDAR
 # ═══════════════════════════════════════════════════════════════════
@@ -911,7 +911,7 @@ async def show_calendar(update: Update, ctx):
     days_d=u["days"]; sl=u["sleep"]; s=u["settings"]
     today_d=date.today()
     await del_prev(ctx,update.effective_chat.id)
- 
+
     wdays=["Пн","Вт","Ср","Чт","Пт","Сб","Вс"]
     try:
         sd=datetime.strptime(s.get("setupDate",tds()),"%Y-%m-%d").date()
@@ -919,9 +919,9 @@ async def show_calendar(update: Update, ctx):
         total_d=(gd-sd).days; sw=s.get("startWeight",0); tw=s.get("targetWeight",0)
         total_diff=tw-sw
     except: sd=today_d; total_d=60; total_diff=0
- 
+
     lines=["📅 *Последние 7 дней*\n━━━━━━━━━━━━━━━"]
- 
+
     for i in range(6,-1,-1):
         d=today_d-timedelta(i); ds_val=dstr(d)
         day=days_d.get(ds_val,{}); sl_d=sl.get(ds_val,{})
@@ -929,9 +929,9 @@ async def show_calendar(update: Update, ctx):
         mark="📍" if is_today else "  "
         el=max((d-sd).days,0)
         exp_w=round(sw+total_diff*el/max(total_d,1),1) if total_d>0 else None
- 
+
         lines.append(f"\n{mark}*{dow} {d.strftime('%d.%m')}*{'  ← сегодня' if is_today else ''}")
- 
+
         aw=day.get("weight")
         if aw and exp_w:
             dif=round(aw-exp_w,1); gm=s.get("goal","lose")
@@ -940,7 +940,7 @@ async def show_calendar(update: Update, ctx):
             lines.append(f"  ⚖️ {aw} кг (план {exp_w}) {st}")
         elif aw: lines.append(f"  ⚖️ {aw} кг")
         elif d<=today_d and exp_w: lines.append(f"  ⚖️ — (план {exp_w} кг)")
- 
+
         if day.get("steps") is not None:
             gs=s.get("stepsGoal",10000)
             lines.append(f"  👟 {day['steps']:,} {'✅' if day['steps']>=gs else '❌'}")
@@ -954,7 +954,7 @@ async def show_calendar(update: Update, ctx):
         if not any([aw,day.get("steps") is not None,"workout" in day,sl_d.get("saved")]):
             lines.append("  · нет данных")
         lines.append("  ──────────────")
- 
+
     # Mini calendar to deadline
     try:
         dl=(gd-today_d).days
@@ -979,10 +979,10 @@ async def show_calendar(update: Update, ctx):
             lines.append("`"+" ".join(row_c)+"`")
         lines.append("\n✅ вес есть · ❌ нет данных · 📍 сегодня · 🎯 цель")
     except: pass
- 
+
     strk=streak(days_d)
     lines.append(f"\n🔥 Стрик: *{strk}* дней")
- 
+
     text="\n".join(lines)
     if len(text)>4000:
         mid=len(lines)//2
@@ -991,7 +991,7 @@ async def show_calendar(update: Update, ctx):
     else:
         msg=await update.message.reply_text(text,parse_mode="Markdown",reply_markup=main_kb())
     ctx.user_data["lm"]=msg.message_id
- 
+
 # ═══════════════════════════════════════════════════════════════════
 # ANALYTICS
 # ═══════════════════════════════════════════════════════════════════
@@ -1000,18 +1000,18 @@ async def show_analytics(update: Update, ctx):
     days_d=u["days"]; sl=u["sleep"]; s=u["settings"]
     today_d=date.today()
     await del_prev(ctx,update.effective_chat.id)
- 
+
     ws=sorted([(k,v["weight"]) for k,v in days_d.items() if v.get("weight")])
     if ws:
         dif=ws[-1][1]-ws[0][1]
         w_txt=f"*{ws[-1][1]:.1f} кг* ({dif:+.1f} {'📉' if dif<0 else '📈'})"
     else: w_txt="нет данных"
- 
+
     gm=s.get("goal","lose")
     sw=s.get("startWeight",0); cur=ws[-1][1] if ws else sw
     if gm=="gain": prog=f"📈 Набрано: +{max(0,cur-sw):.1f} кг"
     else: prog=f"📉 Сброшено: {max(0,sw-cur):.1f} кг"
- 
+
     # Best day of week
     dow_steps={}
     for k,v in days_d.items():
@@ -1025,7 +1025,7 @@ async def show_analytics(update: Update, ctx):
         best=max(dow_steps,key=lambda d:sum(dow_steps[d])/len(dow_steps[d]))
         dnames=["Пн","Вт","Ср","Чт","Пт","Сб","Вс"]
         best_dow=f"\n🏆 Лучший день: *{dnames[best]}* (ср. {int(sum(dow_steps[best])/len(dow_steps[best])):,} шагов)"
- 
+
     # Steps 14 days
     last14=[(today_d-timedelta(i)).isoformat() for i in range(13,-1,-1)]
     steps14=[days_d.get(d,{}).get("steps",0) for d in last14 if days_d.get(d,{}).get("steps") is not None]
@@ -1035,14 +1035,14 @@ async def show_analytics(update: Update, ctx):
         else "▇" if (days_d.get(d,{}).get("steps") or 0)>=goal_s*0.8
         else "▅" if (days_d.get(d,{}).get("steps") or 0)>=goal_s*0.5
         else "▂" if (days_d.get(d,{}).get("steps") or 0)>0 else "░" for d in last14[-7:]])
- 
+
     try: sd=datetime.strptime(s.get("setupDate",tds()),"%Y-%m-%d").date()
     except: sd=today_d
     elapsed=(today_d-sd).days+1
     done=sum(1 for v in days_d.values() if v.get("weight"))
     disc=int(done/max(elapsed,1)*100)
     strk=streak(days_d)
- 
+
     sl_entries=[v for v in sl.values() if v.get("saved")]
     if sl_entries:
         hrs_l=[sleep_hrs(e["start"],e["end"]) for e in sl_entries]
@@ -1050,7 +1050,7 @@ async def show_analytics(update: Update, ctx):
         avg_sc=int(sum(e.get("score",0) for e in sl_entries)/len(sl_entries))
         sl_txt=f"*{avg_sl:.1f}ч* · оценка *{avg_sc}/100*"
     else: sl_txt="нет данных"
- 
+
     # Forecast
     dn,rate=forecast_weight(days_d,s)
     fc_txt=""
@@ -1059,14 +1059,14 @@ async def show_analytics(update: Update, ctx):
         if dn==0: fc_txt="\n🎯 Цель уже достигнута!"
         elif dn<=dl: fc_txt=f"\n🔮 Прогноз (по 7 дням): цель через *{dn} дн.* ✓"
         else: fc_txt=f"\n🔮 Прогноз: {dn} дн. — нужно ускориться!"
- 
+
     tw=[days_d.get((today_d-timedelta(i)).isoformat(),{}) for i in range(7)]
     lw=[days_d.get((today_d-timedelta(i+7)).isoformat(),{}) for i in range(7)]
     tw_s=[e.get("steps",0) for e in tw if e.get("steps")]; lw_s=[e.get("steps",0) for e in lw if e.get("steps")]
     tw_a=int(sum(tw_s)/len(tw_s)) if tw_s else 0; lw_a=int(sum(lw_s)/len(lw_s)) if lw_s else 0
- 
+
     bmr,tdee,kcal=calc_kcal(s)
- 
+
     msg=await update.message.reply_text(
         f"📈 *Аналитика · {goal_name(gm)}*\n\n"
         f"⚖️ Вес: {w_txt}\n{prog}{fc_txt}\n\n"
@@ -1080,7 +1080,7 @@ async def show_analytics(update: Update, ctx):
         f"Дней с данными: *{sum(1 for e in tw if e.get('weight'))}* vs *{sum(1 for e in lw if e.get('weight'))}*",
         parse_mode="Markdown",reply_markup=main_kb())
     ctx.user_data["lm"]=msg.message_id
- 
+
 # ═══════════════════════════════════════════════════════════════════
 # ACHIEVEMENTS
 # ═══════════════════════════════════════════════════════════════════
@@ -1098,7 +1098,7 @@ ACHIEVEMENTS=[
     ("perfect_day","⭐","Идеальный день","Вес+шаги+трен+сон за 1 день"),
     ("good_sleep","🌙","Отличный сон","Оценка сна 85+"),
 ]
- 
+
 def _check_ach(u):
     ul=u.get("achievements",[]); days_d=u["days"]; s=u["settings"]
     def unlock(a):
@@ -1128,7 +1128,7 @@ def _check_ach(u):
             unlock("perfect_day"); break
     if any(v.get("score",0)>=85 for v in u.get("sleep",{}).values() if v.get("saved")): unlock("good_sleep")
     u["achievements"]=ul
- 
+
 async def show_achievements(update: Update, ctx):
     data=load(); u=get_user(data,update.effective_user.id)
     ul=u.get("achievements",[]); xp=u.get("xp",0)
@@ -1144,7 +1144,7 @@ async def show_achievements(update: Update, ctx):
     lines.append(f"\n*{unlocked_count}/{len(ACHIEVEMENTS)}* разблокировано")
     msg=await update.message.reply_text("\n".join(lines),parse_mode="Markdown",reply_markup=main_kb())
     ctx.user_data["lm"]=msg.message_id
- 
+
 # ═══════════════════════════════════════════════════════════════════
 # SETTINGS
 # ═══════════════════════════════════════════════════════════════════
@@ -1171,7 +1171,7 @@ async def show_settings(update: Update, ctx):
         f"Дней с данными: *{done}* · XP: *{u.get('xp',0)}*",
         parse_mode="Markdown",reply_markup=kb)
     ctx.user_data["lm"]=msg.message_id
- 
+
 async def settings_cb(update: Update, ctx):
     q=update.callback_query; await q.answer()
     if q.data=="cfg_export":
@@ -1198,7 +1198,7 @@ async def settings_cb(update: Update, ctx):
         data=load(); u=get_user(data,q.from_user.id)
         u["settings"]={}; save(data)
         await q.edit_message_text("Настройки сброшены. Напиши /start")
- 
+
 # ═══════════════════════════════════════════════════════════════════
 # REMINDERS (daily jobs)
 # ═══════════════════════════════════════════════════════════════════
@@ -1215,7 +1215,7 @@ async def morning_reminder(ctx):
                     text="☀️ *Доброе утро!*\n\nНе забудь взвеситься — напиши вес прямо сюда, например `76.5`",
                     parse_mode="Markdown",reply_markup=main_kb())
             except: pass
- 
+
 async def evening_reminder(ctx):
     """21:00 — remind to log steps"""
     data=load()
@@ -1233,17 +1233,17 @@ async def evening_reminder(ctx):
                     text=f"🌙 *Вечерняя проверка*\n\nЕщё не заполнено: {', '.join(missing)}\n\nШаги можно написать прямо сюда — например `8500`",
                     parse_mode="Markdown",reply_markup=main_kb())
             except: pass
- 
+
 # ═══════════════════════════════════════════════════════════════════
 # TEXT ROUTER
 # ═══════════════════════════════════════════════════════════════════
 async def handle_text(update: Update, ctx):
     t=update.message.text.strip()
     await del_msg(ctx.bot,update.effective_chat.id,update.message.message_id)
- 
+
     # Try quick input first (number = weight/steps)
     if await try_quick_input(update,ctx): return
- 
+
     if any(x in t for x in ["🏠","Главная"]):        await show_home(update,ctx)
     elif any(x in t for x in ["📊","Статус"]):        await show_status(update,ctx)
     elif any(x in t for x in ["📅","Календарь"]):     await show_calendar(update,ctx)
@@ -1254,7 +1254,7 @@ async def handle_text(update: Update, ctx):
             "Выбери раздел 👇\n\n💡 Или просто напиши число:\n`76.5` = вес · `8500` = шаги",
             parse_mode="Markdown",reply_markup=main_kb())
         ctx.user_data["lm"]=msg.message_id
- 
+
 # ═══════════════════════════════════════════════════════════════════
 # WEBAPP
 # ═══════════════════════════════════════════════════════════════════
@@ -1271,19 +1271,19 @@ async def open_webapp(update: Update, ctx):
     await update.message.reply_text(
         "📱 *FIT TRACKER — Мини-апп*\n\nОткрой удобный интерфейс с ползунками:",
         parse_mode="Markdown", reply_markup=kb)
- 
+
 # ═══════════════════════════════════════════════════════════════════
 # MAIN
 # ═══════════════════════════════════════════════════════════════════
 def main():
     app=Application.builder().token(TOKEN).build()
- 
+
     def conv(entries,states):
         return ConversationHandler(
             entry_points=entries, states=states,
             fallbacks=[CommandHandler("cancel",lambda u,c:ConversationHandler.END)],
             allow_reentry=True, per_message=False)
- 
+
     app.add_handler(ConversationHandler(
         entry_points=[CommandHandler("start",cmd_start)],
         states={
@@ -1301,7 +1301,7 @@ def main():
         },
         fallbacks=[CommandHandler("start",cmd_start)],
         allow_reentry=True, per_message=False))
- 
+
     app.add_handler(conv(
         [CommandHandler("weight",start_weight),
          MessageHandler(filters.Regex(r"^(⚖️ Вес|⚖️|Вес)$"),start_weight)],
@@ -1309,7 +1309,7 @@ def main():
          W_VAL: [CallbackQueryHandler(w_val_btn,pattern="^wv_"),
                  CallbackQueryHandler(w_val_btn,pattern="^wd_other"),
                  MessageHandler(filters.TEXT&~filters.COMMAND,w_val_txt)]}))
- 
+
     app.add_handler(conv(
         [CommandHandler("steps",start_steps),
          MessageHandler(filters.Regex(r"^(👟 Шаги|👟|Шаги)$"),start_steps)],
@@ -1317,13 +1317,13 @@ def main():
          ST_VAL: [CallbackQueryHandler(st_val_btn,pattern="^sv_"),
                   CallbackQueryHandler(st_val_btn,pattern="^sd_other"),
                   MessageHandler(filters.TEXT&~filters.COMMAND,st_val_txt)]}))
- 
+
     app.add_handler(conv(
         [CommandHandler("workout",start_workout),
          MessageHandler(filters.Regex(r"^(💪 Тренировка|💪|Тренировка)$"),start_workout)],
         {WO_DATE:[CallbackQueryHandler(wo_date,pattern="^wod_")],
          WO_VAL: [CallbackQueryHandler(wo_val,pattern="^wov_")]}))
- 
+
     app.add_handler(conv(
         [CommandHandler("sleep",start_sleep),
          MessageHandler(filters.Regex(r"^(🌙 Сон|🌙|Сон)$"),start_sleep)],
@@ -1333,13 +1333,13 @@ def main():
          SL_EN:  [CallbackQueryHandler(sl_en_btn,pattern="^slen_"),
                   MessageHandler(filters.TEXT&~filters.COMMAND,sl_en_txt)],
          SL_WK:  [CallbackQueryHandler(sl_wk,pattern="^slw_")]}))
- 
+
     app.add_handler(conv(
         [CommandHandler("rating",start_rating),
          MessageHandler(filters.Regex(r"^(⭐ Оценка дня|⭐|Оценка)$"),start_rating)],
         {RT_DATE:[CallbackQueryHandler(rt_date,pattern="^rtd_")],
          RT_VAL: [CallbackQueryHandler(rt_val,pattern="^rtv_")]}))
- 
+
     app.add_handler(CallbackQueryHandler(settings_cb,pattern="^cfg_"))
     app.add_handler(CommandHandler("home",show_home))
     app.add_handler(CommandHandler("app",open_webapp))
@@ -1349,15 +1349,15 @@ def main():
     app.add_handler(CommandHandler("analytics",show_analytics))
     app.add_handler(CommandHandler("settings",show_settings))
     app.add_handler(MessageHandler(filters.TEXT&~filters.COMMAND,handle_text))
- 
+
     # Daily reminders
     jq=app.job_queue
     if jq:
         from datetime import time as dtime
         jq.run_daily(morning_reminder, time=dtime(8,0,tzinfo=TZ))
         jq.run_daily(evening_reminder, time=dtime(21,0,tzinfo=TZ))
- 
+
     app.run_polling(drop_pending_updates=True)
- 
+
 if __name__=="__main__":
     main()
