@@ -1,12 +1,15 @@
 import os, json, logging, asyncio, re
+from zoneinfo import ZoneInfo
 from datetime import datetime, date, timedelta
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, WebAppInfo
 from telegram.ext import (Application, CommandHandler, MessageHandler,
     CallbackQueryHandler, ConversationHandler, filters, JobQueue)
  
 logging.basicConfig(level=logging.INFO)
 TOKEN    = os.environ.get("BOT_TOKEN", "")
 DATA_FILE = "data.json"
+WEBAPP_URL = os.environ.get("WEBAPP_URL", "")  # Set this in Railway Variables
+TZ = ZoneInfo("Europe/Istanbul")
  
 # ── States ────────────────────────────────────────────────────────
 (S_GOAL,S_NAME,S_AGE,S_GENDER,S_HEIGHT,S_CW,S_TW,S_DATE,S_ACT,S_STEPS) = range(10)
@@ -38,7 +41,7 @@ def get_day(u,d):
     if d not in u["days"]: u["days"][d]={}
     return u["days"][d]
  
-def tds(): return date.today().isoformat()
+def tds(): return datetime.now(TZ).date().isoformat()
 def dstr(d): return d.isoformat() if isinstance(d,date) else d
  
 # ── Helpers ───────────────────────────────────────────────────────
@@ -158,6 +161,7 @@ def main_kb():
         ["💪 Тренировка", "🌙 Сон"],
         ["⭐ Оценка дня", "📅 Календарь"],
         ["📈 Аналитика",  "⚙️ Настройки"],
+        ["📱 Мини-апп"],
     ],resize_keyboard=True)
  
 def day_kb(prefix):
@@ -472,7 +476,7 @@ async def show_home(update: Update, ctx):
     sl_ok="✅" if u["sleep"].get(td,{}).get("saved") else "⬜"
  
     msg=await update.message.reply_text(
-        f"🏠 *{s.get('name','')} · {date.today().strftime('%d.%m.%Y')}*\n\n"
+        f"🏠 *{s.get('name','')} · {datetime.now(TZ).strftime('%d.%m.%Y %H:%M')}*\n\n"
         f"{goal_name(goal)} · осталось *{days_left(s)} дн.*\n"
         f"{pb_time} {time_pct}% времени\n"
         f"Цель: {pbar(goal_pct,100,10)} {goal_pct}%\n\n"
@@ -1252,6 +1256,23 @@ async def handle_text(update: Update, ctx):
         ctx.user_data["lm"]=msg.message_id
  
 # ═══════════════════════════════════════════════════════════════════
+# WEBAPP
+# ═══════════════════════════════════════════════════════════════════
+async def open_webapp(update: Update, ctx):
+    if not WEBAPP_URL:
+        await update.message.reply_text(
+            "⚙️ Мини-апп не настроен. Добавь WEBAPP_URL в Railway Variables.",
+            reply_markup=main_kb())
+        return
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
+    kb = InlineKeyboardMarkup([[
+        InlineKeyboardButton("🚀 Открыть FIT TRACKER", web_app=WebAppInfo(url=WEBAPP_URL))
+    ]])
+    await update.message.reply_text(
+        "📱 *FIT TRACKER — Мини-апп*\n\nОткрой удобный интерфейс с ползунками:",
+        parse_mode="Markdown", reply_markup=kb)
+ 
+# ═══════════════════════════════════════════════════════════════════
 # MAIN
 # ═══════════════════════════════════════════════════════════════════
 def main():
@@ -1321,6 +1342,7 @@ def main():
  
     app.add_handler(CallbackQueryHandler(settings_cb,pattern="^cfg_"))
     app.add_handler(CommandHandler("home",show_home))
+    app.add_handler(CommandHandler("app",open_webapp))
     app.add_handler(CommandHandler("status",show_status))
     app.add_handler(CommandHandler("achievements",show_achievements))
     app.add_handler(CommandHandler("calendar",show_calendar))
@@ -1331,8 +1353,9 @@ def main():
     # Daily reminders
     jq=app.job_queue
     if jq:
-        jq.run_daily(morning_reminder, time=datetime.strptime("08:00","%H:%M").time())
-        jq.run_daily(evening_reminder, time=datetime.strptime("21:00","%H:%M").time())
+        from datetime import time as dtime
+        jq.run_daily(morning_reminder, time=dtime(8,0,tzinfo=TZ))
+        jq.run_daily(evening_reminder, time=dtime(21,0,tzinfo=TZ))
  
     app.run_polling(drop_pending_updates=True)
  
