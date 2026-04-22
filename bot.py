@@ -18,7 +18,7 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     )
  
 async def post_init(app):
-    # Синяя кнопка в левом нижнем углу чата
+    # Синяя кнопка в левом нижем углу чата
     await app.bot.set_chat_menu_button(
         menu_button=MenuButtonWebApp(
             text="🔥 FIT TRACKER",
