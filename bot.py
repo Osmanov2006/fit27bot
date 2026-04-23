@@ -4,7 +4,7 @@ from telegram.ext import Application, CommandHandler, ContextTypes
  
 TOKEN = os.environ.get("BOT_TOKEN", "")
 WEBAPP_URL = os.environ.get("WEBAPP_URL", "https://osmanov2006.github.io/fit-webapp/")
-#v3
+#v4
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     kb = InlineKeyboardMarkup([[
         InlineKeyboardButton(
